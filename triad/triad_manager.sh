@@ -577,6 +577,27 @@ install_llama_cpp() {
         ok "CUDA 路径已配置"
     fi
 
+    # 检查 CUDA/GCC 兼容性（CUDA 11.x 最高支持 GCC 10）
+    if command -v nvcc &>/dev/null && command -v gcc &>/dev/null; then
+        local cuda_version cuda_major gcc_major
+        cuda_version=$(nvcc --version | grep "release" | sed -n 's/.*release \([0-9]\+\)\.\([0-9]\+\).*/\1.\2/p')
+        gcc_major=$(gcc -dumpversion | cut -d. -f1)
+        if [[ -n "$cuda_version" && -n "$gcc_major" ]]; then
+            cuda_major=$(echo "$cuda_version" | cut -d. -f1)
+            if [[ "$cuda_major" -lt 12 && "$gcc_major" -ge 11 ]]; then
+                warn "检测到 CUDA ${cuda_version} + GCC ${gcc_major}，存在已知兼容性问题（CUDA 11.x 最高支持 GCC 10）"
+                info "正在安装 GCC 10 作为替代编译器..."
+                if apt-get install -y gcc-10 g++-10; then
+                    export CC=gcc-10
+                    export CXX=g++-10
+                    ok "已切换至 GCC 10 进行 CUDA 编译 (CC=$CC, CXX=$CXX)"
+                else
+                    warn "GCC 10 安装失败，继续使用系统默认 GCC ${gcc_major}，编译可能失败"
+                fi
+            fi
+        fi
+    fi
+
     # 清理旧构建并重新编译
     pushd "${llama_dir}" >/dev/null || fatal "无法进入 llama.cpp 目录"
     info "清理旧构建目录 ..."
@@ -586,10 +607,10 @@ install_llama_cpp() {
     info "运行 CMake 配置（启用 CUDA） ..."
     # 针对 2080Ti (Turing, SM75) 优化
     cmake -B build \
-        -DLLAMA_CUDA=ON \
-        -DLLAMA_CUDA_F16=ON \
+        -DGGML_CUDA=ON \
+        -DGGML_CUDA_F16=ON \
         -DCMAKE_CUDA_ARCHITECTURES="75" \
-        -DLLAMA_NATIVE=ON \
+        -DGGML_NATIVE=ON \
         -DCMAKE_BUILD_TYPE=Release \
         -DLLAMA_BUILD_SERVER=ON \
         -DLLAMA_BUILD_EXAMPLES=OFF \
