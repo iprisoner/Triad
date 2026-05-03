@@ -1,0 +1,860 @@
+# =============================================================================
+# Triad HPC Docker Compose — 双路 Xeon E5-2673v3 + 魔改 RTX 2080Ti 22GB (llama.cpp 版)
+# =============================================================================
+# 适用场景: WSL2 Ubuntu 22.04 / 原生 Linux 5.15+
+# 硬件假设:
+#   - CPU: 2x Intel Xeon E5-2673v3 (24C/48T, 2x NUMA Nodes)
+#   - RAM: 128 GB DDR4 ECC (建议 64GB+ per NUMA node)
+#   - GPU: 魔改 NVIDIA RTX 2080Ti 22GB VRAM (非标准 11GB)
+#   - 存储: NVMe SSD (根分区) + 可选数据盘
+#
+# 启动前检查清单:
+#   1. NVIDIA Container Toolkit 已安装: `nvidia-ctk runtime configure --runtime=docker`
+#   2. Docker daemon 已启用 nvidia runtime (见 docs/hpc_scheduling.md)
+#   3. WSL2 已配置 .wslconfig memory=120GB (为宿主机留 8GB)
+#   4. 内核参数已调优 (见 docs/hpc_scheduling.md 第 4 节)
+#   5. NUMA 拓扑已验证: `numactl --hardware` 与 `lscpu | grep NUMA`
+#   6. GGUF 模型已放置到 ~/.triad/models/ (见 docs/llama_migration.md 第 3 节)
+# =============================================================================
+
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# 全局网络定义
+# ---------------------------------------------------------------------------
+# triad-core:   核心控制平面 (OpenClaw ↔ Hermes ↔ Registry)
+# triad-data:   数据平面 (Qdrant ↔ Embedding API)
+# triad-worker: 任务执行平面 (ClawPod ↔ LLM 推理服务)
+# triad-render: 渲染平面 (ClawPod ↔ ComfyUI 宿主机 API)
+# ---------------------------------------------------------------------------
+networks:
+  triad-core:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.1.0/24
+    driver_opts:
+      com.docker.network.bridge.name: br-triad-core
+      # 降低桥接 MTU 避免 WSL2 网络层分片开销
+      com.docker.network.driver.mtu: "1450"
+
+  triad-data:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.2.0/24
+    driver_opts:
+      com.docker.network.bridge.name: br-triad-data
+      com.docker.network.driver.mtu: "1450"
+
+  triad-worker:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.3.0/24
+    driver_opts:
+      com.docker.network.bridge.name: br-triad-worker
+      com.docker.network.driver.mtu: "1450"
+
+  triad-render:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.4.0/24
+    driver_opts:
+      com.docker.network.bridge.name: br-triad-render
+      com.docker.network.driver.mtu: "1450"
+
+# ---------------------------------------------------------------------------
+# 全局卷定义
+# ---------------------------------------------------------------------------
+volumes:
+  # Qdrant 向量持久化存储
+  qdrant-storage:
+    driver: local
+
+  # OpenClaw 网关状态与消息队列溢出存储
+  openclaw-state:
+    driver: local
+
+  # Hermes 记忆与策略快照持久化
+  hermes-memory:
+    driver: local
+
+  # MCP Registry 服务注册表
+  registry-data:
+    driver: local
+
+  # llama-server 外部记忆/上下文注入 (由 vram_scheduler 或 Hermes 写入)
+  triad-memory:
+    driver: local
+
+  # ComfyUI 模型与输出 (已迁移到宿主机原生 venv 运行，此处保留卷定义供兼容性参考)
+  # comfyui-models:
+  #   driver: local
+  # comfyui-output:
+  #   driver: local
+  # comfyui-workflows:
+  #   driver: local
+
+  # ClawPod 模板共享存储 (代码挂载点)
+  clawpod-shared:
+    driver: local
+
+# =============================================================================
+# 核心服务定义
+# =============================================================================
+services:
+
+  # =========================================================================
+  # OpenClaw Gateway — TypeScript 宿主框架
+  # 职责: 消息网关、WebSocket/SSE 流式推送、ClawPod 生命周期管理、技能市场
+  # 调度策略: IO 密集型 → 绑定 NUMA Node 0 前 8 物理核 + 超线程 (低延迟网络栈)
+  # =========================================================================
+  openclaw:
+    build:
+      context: ./openclaw
+      dockerfile: Dockerfile
+      args:
+        - NODE_ENV=production
+    image: triad/openclaw:hpc-latest
+    container_name: triad-openclaw
+    restart: unless-stopped
+
+    # CPU 亲和性: Node 0 前 8 核 (0-7 物理, 24-31 SMT)
+    # 保留 Node 0 后 4 核给 Hermes，避免同 Node 竞争内存带宽
+    cpuset: "0-7,24-31"
+
+    # NUMA 节点强制绑定 — 确保内存分配在 Node 0
+    # WSL2 下若 numactl 不可用，则依赖 cpuset 的隐式 NUMA 倾向
+    # 原生 Linux 建议 uncomment: command 前缀添加 numactl --cpunodebind=0 --membind=0
+
+    deploy:
+      resources:
+        limits:
+          # 限制在 Node 0 本地内存 (约 64GB 总量，分配 16GB 给 Gateway)
+          memory: 16G
+          # 禁用 swap 避免 IO 抖动穿透到 WSL2 VHD
+          swap: 0
+        reservations:
+          memory: 4G
+
+    # 特权与能力 — 仅保留 ClawPod 管理所需的最小能力集
+    cap_add:
+      - NET_ADMIN        # 创建 ClawPod 虚拟网桥
+      - SYS_ADMIN        # cgroup 操作 (用于 ClawPod 资源隔离)
+    cap_drop:
+      - ALL
+    # 安全选项: 启用 seccomp 但不限制网络/进程相关调用
+    security_opt:
+      - seccomp:./openclaw/seccomp-profile.json
+      - no-new-privileges:true
+
+    environment:
+      # ACP (Agent Control Protocol) 监听端口
+      ACP_BIND_ADDR: "0.0.0.0:7001"
+      ACP_WORKERS: "8"                          # 匹配绑定的 8 物理核
+
+      # WebSocket / SSE 流式推送
+      WS_BIND_ADDR: "0.0.0.0:7002"
+      WS_MAX_CONNECTIONS: "4096"
+      WS_HEARTBEAT_INTERVAL_SEC: "30"
+
+      # ClawPod Docker 套接字 (用于动态创建/销毁任务容器)
+      DOCKER_SOCK_PATH: "/var/run/docker.sock"
+      CLAWPOD_NETWORK: "triad-worker"
+      CLAWPOD_IMAGE_PREFIX: "triad/clawpod"
+
+      # Hermes 认知层连接
+      HERMES_AGENT_URL: "http://hermes:8000"
+      HERMES_ACP_ENDPOINT: "tcp://hermes:7001"
+
+      # MCP Registry 连接
+      MCP_REGISTRY_URL: "http://registry:8500"
+
+      # 本地 LLM 路由 (单一 llama-server 端点，OpenAI 兼容格式)
+      MODEL_API_URL_PRIMARY: "http://llama-server:8080/v1"     # llama.cpp OpenAI 兼容 API
+      MODEL_API_URL_SECONDARY: ""                                # 无次要本地 LLM
+      MODEL_API_URL_FALLBACK: ""                                 # 云端 API (Claude/OpenAI)
+      MODEL_ROUTING_STRATEGY: "local-priority"                   # local-priority | round-robin | fallback
+
+      # 日志与观测
+      LOG_LEVEL: "info"
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+
+    ports:
+      - "7001:7001"      # ACP Agent Control Protocol
+      - "7002:7002"      # WebSocket 流式推送
+      - "8080:8080"      # HTTP API / 技能市场 UI
+
+    volumes:
+      - openclaw-state:/app/state
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - clawpod-shared:/shared:ro
+
+    networks:
+      - triad-core
+      - triad-worker
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    # 调度优先级 — 确保 Gateway 在 Hermes 之前启动
+    depends_on:
+      - registry
+      - qdrant
+
+  # =========================================================================
+  # Hermes Agent — Python 认知进化层
+  # 职责: 策略进化、错误分类、记忆管理、Embedding 推理
+  # 调度策略: CPU 跨越 NUMA Node 0 后 4 核 + Node 1 前 8 核 (为 Python GIL 提供宽队列)
+  # GPU: 常驻 2GB VRAM — BGE-large Embedding 模型 (毫秒级响应)
+  # =========================================================================
+  hermes:
+    build:
+      context: ./hermes
+      dockerfile: Dockerfile
+      args:
+        - PYTHON_VERSION=3.11
+        - INSTALL_DEV=false
+    image: triad/hermes:hpc-latest
+    container_name: triad-hermes
+    restart: unless-stopped
+
+    # CPU 亲和性: Node 0 后 4 核 + Node 1 前 8 核
+    # 共 12 物理核 24 线程，Python GIL 可利用超线程宽化指令流水线
+    cpuset: "8-11,32-35,12-19,36-43"
+
+    deploy:
+      resources:
+        limits:
+          # 跨 NUMA 访问需要更大内存带宽，预留 24GB (含 PyTorch/NumPy 缓存)
+          memory: 24G
+          swap: 0
+        reservations:
+          memory: 8G
+          # GPU 预留: NVIDIA 2080Ti (不支持 MIG，使用整卡 + 显存软限制)
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    runtime: nvidia
+
+    # 环境变量 — 显存分区与模型配置
+    environment:
+      # ===== ComfyUI 宿主机连接配置 =====
+      # ComfyUI 已从 Docker 容器迁移到 WSL2 宿主机原生 venv 运行
+      # MCP Bridge 通过 host.docker.internal 访问宿主机 ComfyUI API
+      COMFYUI_HOST: "host.docker.internal"
+      COMFYUI_PORT: "8188"
+
+      # ===== CUDA / GPU 显存分区配置 =====
+      # 魔改 2080Ti 22GB 显存分配策略 (llama.cpp 版)
+      # 常驻区: 2GB (本服务独占) — BGE-large Embedding
+      # 通过 PyTorch 显存预留实现软隔离
+      CUDA_VISIBLE_DEVICES: "0"
+      NVIDIA_VISIBLE_DEVICES: "0"
+      
+      # 限制 PyTorch CUDA 显存分配池 (常驻 2GB)
+      PYTORCH_CUDA_ALLOC_CONF: "max_split_size_mb:512,expandable_segments:True"
+      
+      # 显存硬上限 — 2GB 常驻 Embedding 区
+      # 注: 2080Ti 不支持 MIG，此处通过环境变量约束，实际仍占整卡上下文
+      # 使用 NVIDIA Memory Management 协作式释放
+      HERMES_VRAM_LIMIT_MB: "2048"
+      HERMES_VRAM_RESIDENT_MB: "1536"    # 1.5GB BGE-large fp16 权重
+      HERMES_VRAM_OVERHEAD_MB: "512"     # 激活/缓存开销
+
+      # ===== ACP 协议配置 =====
+      ACP_LISTEN_HOST: "0.0.0.0"
+      ACP_LISTEN_PORT: "7001"
+      ACP_WORKERS: "4"                   # 匹配 Node 0 后 4 核
+
+      # ===== MCP (Model Context Protocol) 配置 =====
+      MCP_SERVER_HOST: "0.0.0.0"
+      MCP_SERVER_PORT: "8080"
+      MCP_REGISTRY_URL: "http://registry:8500"
+
+      # ===== Embedding 服务配置 (常驻 2GB VRAM) =====
+      EMBEDDING_MODEL: "BAAI/bge-large-zh-v1.5"
+      EMBEDDING_DEVICE: "cuda"
+      EMBEDDING_BATCH_SIZE: "32"
+      EMBEDDING_MAX_LENGTH: "512"
+      EMBEDDING_API_PORT: "9000"
+      EMBEDDING_API_BIND: "0.0.0.0"
+
+      # ===== 记忆管理 (Qdrant 向量数据库) =====
+      QDRANT_HOST: "qdrant"
+      QDRANT_PORT: "6333"
+      QDRANT_COLLECTION_NAME: "hermes-memory"
+      QDRANT_VECTOR_SIZE: "1024"         # bge-large 输出维度
+
+      # ===== 本地 LLM 动态路由 (llama.cpp OpenAI 兼容) =====
+      LLM_API_URL: "http://llama-server:8080/v1/chat/completions"
+      LLM_API_BASE: "http://llama-server:8080"                  # OpenAI 兼容基础 URL
+      LLM_MODEL_NAME: "qwen-14b-chat.Q4_K_M.gguf"               # 默认模型标识
+      FALLBACK_CLOUD_API_URL: ""                                 # 云端降级
+
+      # 推理策略: 本地 LLM 显存可用时优先，否则云端
+      # llama.cpp 可通过 -ngl 0 将权重完全卸载到 CPU/系统内存，实现 GPU 显存彻底释放
+      INFERENCE_STRATEGY: "adaptive"
+      INFERENCE_LOCAL_VRAM_THRESHOLD_MB: "4096"   # 当可用 VRAM > 4GB 时启用本地 GPU 推理
+
+      # ===== Python 性能调优 =====
+      PYTHONUNBUFFERED: "1"
+      OMP_NUM_THREADS: "12"              # 匹配跨 NUMA 的 12 物理核
+      MKL_NUM_THREADS: "12"
+      OPENBLAS_NUM_THREADS: "12"
+      NUMEXPR_NUM_THREADS: "12"
+      
+      # 避免 OpenMP 线程在超线程核上过度订阅
+      OMP_PLACES: "cores"
+      OMP_PROC_BIND: "spread"
+
+      # 日志
+      LOG_LEVEL: "INFO"
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    ports:
+      - "8000:8000"      # Hermes HTTP API
+      - "9000:9000"      # Embedding 推理 API (内部高频调用)
+
+    volumes:
+      - hermes-memory:/app/memory
+
+    networks:
+      - triad-core
+      - triad-data
+      - triad-worker
+
+    # 宿主机 ComfyUI 访问: 确保容器内 host.docker.internal 正确解析到宿主机
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    depends_on:
+      - qdrant
+      - registry
+
+  # =========================================================================
+  # Qdrant — 向量数据库 (Embedding 存储与语义检索)
+  # 调度策略: 轻量 IO 服务，绑定 Node 1 预留 2 核
+  # =========================================================================
+  qdrant:
+    image: qdrant/qdrant:v1.8.0
+    container_name: triad-qdrant
+    restart: unless-stopped
+
+    cpuset: "20-21,44-45"
+
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          swap: 0
+        reservations:
+          memory: 2G
+
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: "6333"
+      QDRANT__SERVICE__GRPC_PORT: "6334"
+      # 启用内存映射以处理超内存集合
+      QDRANT__STORAGE__STORAGE_PATH: "/qdrant/storage"
+      QDRANT__STORAGE__SNAPSHOTS_PATH: "/qdrant/snapshots"
+      # 优化缓存 — 限制在 6GB 以内
+      QDRANT__STORAGE__WAL_CAPACITY_MB: "64"
+      QDRANT__STORAGE__MAX_SEGMENT_NUMBER: "6"
+
+    volumes:
+      - qdrant-storage:/qdrant/storage
+
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+
+    networks:
+      - triad-data
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # =========================================================================
+  # MCP Registry — MCP Daemon 注册中心
+  # 职责: Hermes ↔ Claude Code 的服务发现与能力注册
+  # 调度策略: Node 1 预留 2 核，低内存
+  # =========================================================================
+  registry:
+    build:
+      context: ./registry
+      dockerfile: Dockerfile
+    image: triad/registry:hpc-latest
+    container_name: triad-registry
+    restart: unless-stopped
+
+    cpuset: "22-23,46-47"
+
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          swap: 0
+        reservations:
+          memory: 256M
+
+    environment:
+      REGISTRY_BIND: "0.0.0.0:8500"
+      REGISTRY_HEARTBEAT_SEC: "30"
+      REGISTRY_TTL_SEC: "300"
+      MCP_PROTOCOL_VERSION: "2024-11-05"
+
+    ports:
+      - "8500:8500"
+
+    volumes:
+      - registry-data:/data
+
+    networks:
+      - triad-core
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8500/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # =========================================================================
+  # llama-server — 统一本地 LLM 推理服务 (llama.cpp)
+  # 职责: Qwen-14B-Chat GGUF 主推理模型 (Q4_K_M 量化，~9GB VRAM 常态)
+  # 调度策略: Node 1 剩余核心 + GPU 整卡 (通过 -ngl 参数动态切换 GPU/CPU 模式)
+  # 显存策略: GPU 常态 -ngl 99 (约 9GB)，渲染态由 vram_scheduler 切换为 -ngl 0 (0GB VRAM)
+  # 重要: command 由宿主机 vram_scheduler.py 外部进程管理动态覆写，此处仅提供默认 GPU 启动参数
+  # =========================================================================
+  llama-server:
+    image: ghcr.io/ggerganov/llama.cpp:server-cuda
+    container_name: triad-llama-server
+    restart: unless-stopped
+
+    # 绑定 Node 1 剩余核心 (原 vllm/ollama 位置)
+    cpuset: "20-23,44-47"
+
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+          swap: 0
+        reservations:
+          memory: 8G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    runtime: nvidia
+
+    environment:
+      NVIDIA_VISIBLE_DEVICES: "0"
+      CUDA_VISIBLE_DEVICES: "0"
+
+    # 默认 GPU 启动命令 (-ngl 99  offload 所有层到 GPU)
+    # vram_scheduler.py 在渲染需要时会通过 docker compose exec / docker restart 等方式
+    # 动态替换为 CPU 模式: -ngl 0 (权重保留在系统内存，GPU 显存完全释放)
+    command: >
+      llama-server
+      -m /models/qwen-14b-chat.Q4_K_M.gguf
+      --host 0.0.0.0
+      --port 8080
+      -ngl 99
+      -c 8192
+      --metrics
+      --slots
+      --cont-batching
+      -np 4
+
+    ports:
+      - "8080:8080"
+
+    volumes:
+      # GGUF 模型文件挂载: 宿主机 ~/.triad/models/ → 容器 /models
+      - type: bind
+        source: ~/.triad/models
+        target: /models
+        read_only: true
+      # 外部记忆/上下文注入卷 (可由 Hermes 或 vram_scheduler 写入)
+      - triad-memory:/data/memory:ro
+
+    networks:
+      - triad-worker
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+    profiles:
+      - "local-llm"
+      - "hpc-full"
+      - "debug"
+
+  # =========================================================================
+  # ClawPod 容器模板 — 任务执行沙箱 (多规格)
+  # 
+  # 说明: ClawPod 为每个任务动态创建的 Docker 容器。
+  # 以下定义三种规格模板，通过 `docker compose run` 或 OpenClaw 动态实例化。
+  # 不设置 restart: 始终，任务完成即退出。
+  # =========================================================================
+
+  # -------------------------------------------------------------------------
+  # ClawPod Small — 嵌入/轻量分析任务
+  # 规格: 1 核 2GB 内存，无 GPU
+  # 用途: 代码嵌入生成、轻量 lint、文件分析
+  # -------------------------------------------------------------------------
+  clawpod-small:
+    image: triad/clawpod:base
+    build:
+      context: ./clawpod
+      dockerfile: Dockerfile.base
+    container_name: triad-clawpod-small
+    restart: "no"
+    stdin_open: true
+    tty: true
+
+    # ClawPod 为动态任务容器 — cpuset 由 OpenClaw 运行时根据负载动态分配。
+    # 此处不预设 cpuset，仅通过 cpus/memory 限制资源份额。
+    # OpenClaw 调用 Docker API 启动时注入: HostConfig.CpusetCpus="<空闲核心>"
+    #
+    # 可用共享核心池 (常驻服务低负载时借用):
+    #   Node 0: 0-5 (OpenClaw I/O 等待期), 8-11 (Hermes GIL 释放期)
+    #   Node 1: 16-19, 40-43 (Qdrant/Registry 轻量期)
+    #
+    # 生产启动命令示例:
+    #   docker compose -f docker-compose.hpc.yml run --rm \
+    #     --cpuset-cpus="2" clawpod-small [command]
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2G
+          swap: 0
+        reservations:
+          memory: 512M
+
+    # 安全: 无特权，只读根文件系统，临时可写层
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=128M
+      - /var/tmp:noexec,nosuid,size=64M
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+
+    environment:
+      CLAWPOD_SIZE: "small"
+      CLAWPOD_CPU_LIMIT: "1"
+      CLAWPOD_MEM_LIMIT: "2G"
+      CLAWPOD_GPU_ENABLED: "false"
+      CLAWPOD_TIMEOUT_SEC: "300"
+      
+      # ComfyUI 宿主机连接 (原生 venv 模式)
+      COMFYUI_HOST: "host.docker.internal"
+      COMFYUI_PORT: "8188"
+      
+      # 任务通信
+      TASK_BROKER_URL: "http://openclaw:7001"
+      EMBEDDING_API_URL: "http://hermes:9000"
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    volumes:
+      - clawpod-shared:/shared:ro
+      - type: tmpfs
+        target: /workspace
+        tmpfs:
+          size: 1G
+
+    networks:
+      - triad-worker
+
+    profiles:
+      - "clawpod"
+      - "hpc-full"
+
+  # -------------------------------------------------------------------------
+  # ClawPod Medium — 代码分析 / 中等推理任务
+  # 规格: 2 核 4GB 内存，可选 GPU 推理
+  # 用途: 静态分析、AST 解析、中等规模数据处理
+  # -------------------------------------------------------------------------
+  clawpod-medium:
+    image: triad/clawpod:base
+    container_name: triad-clawpod-medium
+    restart: "no"
+    stdin_open: true
+    tty: true
+
+    # ClawPod 为动态任务容器 — cpuset 由 OpenClaw 运行时根据负载动态分配。
+    # 此处不预设 cpuset，仅通过 cpus/memory/GPU 限制资源份额。
+    # OpenClaw 调用 Docker API 启动时注入: HostConfig.CpusetCpus="<空闲核心>"
+    #
+    # 生产启动命令示例:
+    #   docker compose -f docker-compose.hpc.yml run --rm \
+    #     --cpuset-cpus="0-1" clawpod-medium [command]
+    #   docker compose -f docker-compose.hpc.yml run --rm \
+    #     --cpuset-cpus="4-11,28-35" clawpod-large [command]
+
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+          swap: 0
+        reservations:
+          memory: 1G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    runtime: nvidia
+
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=256M
+      - /var/tmp:noexec,nosuid,size=128M
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+
+    environment:
+      CLAWPOD_SIZE: "medium"
+      CLAWPOD_CPU_LIMIT: "2"
+      CLAWPOD_MEM_LIMIT: "4G"
+      CLAWPOD_GPU_ENABLED: "true"
+      CLAWPOD_GPU_VRAM_MB: "512"        # 中规格借用 512MB 用于小模型推理
+      CLAWPOD_TIMEOUT_SEC: "600"
+
+      # ComfyUI 宿主机连接 (原生 venv 模式)
+      COMFYUI_HOST: "host.docker.internal"
+      COMFYUI_PORT: "8188"
+
+      CUDA_VISIBLE_DEVICES: "0"
+      NVIDIA_VISIBLE_DEVICES: "0"
+
+      TASK_BROKER_URL: "http://openclaw:7001"
+      EMBEDDING_API_URL: "http://hermes:9000"
+      LOCAL_LLM_URL: "http://llama-server:8080/v1/chat/completions"
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    volumes:
+      - clawpod-shared:/shared:ro
+      - type: tmpfs
+        target: /workspace
+        tmpfs:
+          size: 2G
+
+    networks:
+      - triad-worker
+
+    profiles:
+      - "clawpod"
+      - "hpc-full"
+
+  # -------------------------------------------------------------------------
+  # ClawPod Large — 重推理 / 本地 LLM 微调任务
+  # 规格: 8 核 16GB 内存，GPU 推理
+  # 用途: 本地模型推理、参数微调、大规模数据处理
+  # CPU: Node 1 全核心 (与 Hermes 共享时段错开)
+  # -------------------------------------------------------------------------
+  clawpod-large:
+    image: triad/clawpod:gpu
+    build:
+      context: ./clawpod
+      dockerfile: Dockerfile.gpu
+    container_name: triad-clawpod-large
+    restart: "no"
+    stdin_open: true
+    tty: true
+
+    # ClawPod 为动态任务容器 — cpuset 由 OpenClaw 运行时根据负载动态分配。
+    # 此处不预设 cpuset，仅通过 cpus/memory/GPU 限制资源份额。
+    # OpenClaw 调用 Docker API 启动时注入: HostConfig.CpusetCpus="<空闲核心>"
+    # 8 核 Large 容器通常借用 Node 0 + Node 1 的分散核心以避免单 Node 内存带宽瓶颈。
+    #
+    # 生产启动命令示例:
+    #   docker compose -f docker-compose.hpc.yml run --rm \
+    #     --cpuset-cpus="0-3,6-9,24-27,30-33" clawpod-large [command]
+
+    deploy:
+      resources:
+        limits:
+          cpus: "8.0"
+          memory: 16G
+          swap: 0
+        reservations:
+          memory: 4G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    runtime: nvidia
+
+    # Large 容器需要可写以安装额外依赖
+    read_only: false
+
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+
+    environment:
+      CLAWPOD_SIZE: "large"
+      CLAWPOD_CPU_LIMIT: "8"
+      CLAWPOD_MEM_LIMIT: "16G"
+      CLAWPOD_GPU_ENABLED: "true"
+      CLAWPOD_GPU_VRAM_MB: "4096"       # 大规格可借用弹性区 (llama-server 切换为 CPU 后空余)
+      CLAWPOD_TIMEOUT_SEC: "1800"
+
+      # ComfyUI 宿主机连接 (原生 venv 模式)
+      COMFYUI_HOST: "host.docker.internal"
+      COMFYUI_PORT: "8188"
+
+      CUDA_VISIBLE_DEVICES: "0"
+      NVIDIA_VISIBLE_DEVICES: "0"
+      
+      # 大规格容器内可直接调用 llama-server OpenAI 兼容 API
+      LOCAL_LLM_URL: "http://llama-server:8080/v1/chat/completions"
+      LOCAL_LLM_BASE: "http://llama-server:8080"
+
+      # Python 多线程优化
+      OMP_NUM_THREADS: "8"
+      MKL_NUM_THREADS: "8"
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    volumes:
+      - clawpod-shared:/shared:ro
+      - type: tmpfs
+        target: /workspace
+        tmpfs:
+          size: 8G
+
+    networks:
+      - triad-worker
+      - triad-render
+
+    profiles:
+      - "clawpod"
+      - "hpc-full"
+
+  # =========================================================================
+  # text-generation-webui — 备选本地 LLM 前端 (调试模式)
+  # 职责: 提供 Gradio UI 用于模型调试与手动推理
+  # 调度策略: 与 llama-server 互斥或共享调试，仅在 debug 模式下启动
+  # 显存策略: 可与 llama-server 同时存在 (debug profile 下两者均启动)
+  # =========================================================================
+  textgen-webui:
+    image: ghcr.io/oobabooga/text-generation-webui:latest
+    container_name: triad-textgen-webui
+    restart: "no"
+
+    cpuset: "12-19,36-43"
+
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+          swap: 0
+        reservations:
+          memory: 4G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    runtime: nvidia
+
+    environment:
+      CUDA_VISIBLE_DEVICES: "0"
+      NVIDIA_VISIBLE_DEVICES: "0"
+      CLI_ARGS: >-
+        --listen --port 7860
+        --api --api-port 5000
+        --loader transformers
+        --model-dir /models
+        --max_seq_len 4096
+      # 显存控制通过 --gpu-memory 参数 (在 CLI_ARGS 中按模型指定)
+
+    ports:
+      - "7860:7860"      # Gradio UI
+      - "5000:5000"      # API 端口
+
+    volumes:
+      - type: bind
+        source: ~/.triad/models
+        target: /models
+        read_only: true
+
+    networks:
+      - triad-worker
+
+    profiles:
+      - "debug"
+
+# =============================================================================
+# 启动配置组合 (profile 用法)
+# =============================================================================
+# 基础核心服务:  docker compose up -d
+#   启动: openclaw, hermes, qdrant, registry
+#
+# 完整 HPC 模式: docker compose --profile hpc-full up -d
+#   启动: 核心服务 + llama-server (GPU) + clawpod 模板
+#
+# 仅本地 LLM:    docker compose --profile local-llm up -d
+#   启动: 核心服务 + llama-server (GPU 模式)
+#
+# 仅渲染:        docker compose --profile render up -d
+#   启动: 核心服务 (ComfyUI 在宿主机手动启动: ~/.triad/apps/comfyui/python main.py --listen 0.0.0.0 --port 8188)
+#
+# 调试模式:      docker compose --profile debug up -d
+#   启动: 核心服务 + llama-server + text-generation-webui
+#
+# ClawPod 动态创建 (由 OpenClaw 调用):
+#   docker compose -f docke

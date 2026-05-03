@@ -1,0 +1,83 @@
+{
+  "version": "2.1",
+  "registry": {
+    "sqlite": {
+      "name": "SQLite Database",
+      "command": "npx -y @modelcontextprotocol/server-sqlite",
+      "args": ["--db-path", "/data/triad.db"],
+      "env": {},
+      "enabled": true,
+      "category": "database",
+      "description": "本地 SQLite 数据库查询与持久化"
+    },
+    "filesystem": {
+      "name": "Filesystem Access",
+      "command": "npx -y @modelcontextprotocol/server-filesystem",
+      "args": ["/workspace"],
+      "env": {},
+      "enabled": true,
+      "category": "filesystem",
+      "description": "文件系统读写与目录浏览"
+    },
+    "brave-search": {
+      "name": "Brave Search",
+      "command": "npx -y @modelcontextprotocol/server-brave-search",
+      "args": [],
+      "env": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+      },
+      "enabled": false,
+      "category": "search",
+      "description": "联网搜索与实时信息获取（需 API Key）"
+    },
+    "github": {
+      "name": "GitHub Operations",
+      "command": "npx -y @modelcontextprotocol/server-github",
+      "args": [],
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "enabled": false,
+      "category": "devops",
+      "description": "代码仓库操作、PR、Issue 管理"
+    },
+    "fetch": {
+      "name": "Web Fetch",
+      "command": "npx -y @modelcontextprotocol/server-fetch",
+      "args": [],
+      "env": {},
+      "enabled": true,
+      "category": "network",
+      "description": "网页内容抓取与 API 调用"
+    },
+    "playwright": {
+      "name": "Playwright Browser",
+      "command": "npx -y @microsoft/playwright-mcp",
+      "args": [],
+      "env": {},
+      "enabled": false,
+      "category": "browser",
+      "description": "浏览器自动化、网页截图、元素操作"
+    },
+    "pydantic-sandbox": {
+      "name": "Python Sandbox",
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-p", "8080:8080", "pydantic/pydantic-ai-mcp"],
+      "env": {},
+      "enabled": false,
+      "category": "code-execution",
+      "description": "安全 Python 代码沙箱执行"
+    },
+    "apify": {
+      "name": "Apify Web Scraping",
+      "command": "npx -y apify-mcp-server",
+      "args": [],
+      "env": {
+        "APIFY_TOKEN": "${APIFY_TOKEN}"
+      },
+      "enabled": false,
+      "category": "scraping",
+      "description": "3000+ 云工具，网页数据抓取"
+    }
+  }
+}
