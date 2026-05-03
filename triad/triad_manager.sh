@@ -586,7 +586,7 @@ LLAMA_MODEL_PATH=${LLAMA_MODEL_PATH}
 
 # 服务配置
 COMFYUI_HOST=host.docker.internal
-COMFYUI_PORT=8188
+COMFYUI_PORT=18188
 
 # 网络配置
 HF_ENDPOINT=${HF_ENDPOINT_URL}
@@ -624,8 +624,8 @@ print_install_complete() {
     echo -e "${C_GREEN}║  服务地址:                                               ║${C_RESET}"
     echo -e "${C_GREEN}║    Web UI:      http://localhost:8080/panel               ║${C_RESET}"
     echo -e "${C_GREEN}║    Gateway:     ws://localhost:8080/ws/tasks            ║${C_RESET}"
-    echo -e "${C_GREEN}║    llama-srv:  http://localhost:8000/v1/chat/completions║${C_RESET}"
-    echo -e "${C_GREEN}║    ComfyUI:    http://localhost:8188                   ║${C_RESET}"
+    echo -e "${C_GREEN}║    llama-srv:  http://localhost:18000/v1/chat/completions║${C_RESET}"
+    echo -e "${C_GREEN}║    ComfyUI:    http://localhost:18188                   ║${C_RESET}"
     echo -e "${C_GREEN}${C_BOLD}╠═══════════════════════════════════════════════════════════╣${C_RESET}"
     echo -e "${C_GREEN}║  硬件信息:                                               ║${C_RESET}"
     echo -e "${C_GREEN}║    GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | sed 's/^[[:space:]]*//')${C_RESET}"
@@ -714,8 +714,8 @@ cmd_start() {
     # --- 1. 检查并启动 ComfyUI ---
     step "检查 ComfyUI 状态"
     local comfyui_ready=false
-    if curl -s --max-time 3 "http://localhost:8188/system_stats" &>/dev/null; then
-        success "ComfyUI 已在运行 (localhost:8188)"
+    if curl -s --max-time 3 "http://localhost:18188/system_stats" &>/dev/null; then
+        success "ComfyUI 已在运行 (localhost:18188)"
         comfyui_ready=true
     else
         warn "ComfyUI 未启动，尝试自动拉起..."
@@ -737,7 +737,7 @@ cmd_start() {
         detail "启动 ComfyUI (nohup)..."
         nohup python main.py \
             --listen 0.0.0.0 \
-            --port 8188 \
+            --port 18188 \
             > "${COMFYUI_LOG}" 2>&1 &
 
         local comfyui_pid=$!
@@ -746,7 +746,7 @@ cmd_start() {
         # 等待启动
         detail "等待 ComfyUI 就绪 (最多 60 秒)..."
         local waited=0
-        while ! curl -s --max-time 2 "http://localhost:8188/system_stats" &>/dev/null; do
+        while ! curl -s --max-time 2 "http://localhost:18188/system_stats" &>/dev/null; do
             sleep 2
             waited=$((waited + 2))
             if ! kill -0 "${comfyui_pid}" 2>/dev/null; then
@@ -794,8 +794,7 @@ cmd_start() {
     local llama_ready=false
     local llama_wait=0
     while [[ ${llama_wait} -lt 60 ]]; do
-        if curl -s --max-time 2 "http://localhost:8000/health" &>/dev/null || \
-           curl -s --max-time 2 "http://localhost:8080/health" &>/dev/null; then
+        if curl -s --max-time 2 "http://localhost:18000/health" &>/dev/null; then
             llama_ready=true
             break
         fi
@@ -906,8 +905,8 @@ print_start_panel() {
     echo -e "${C_PURPLE}${C_BOLD}╠══════════════════════════════════════════════════════════════╣${C_RESET}"
     echo -e "${C_PURPLE}║  Web UI:      http://localhost:8080/panel                   ║${C_RESET}"
     echo -e "${C_PURPLE}║  Gateway:     ws://localhost:8080/ws/tasks                  ║${C_RESET}"
-    echo -e "${C_PURPLE}║  llama-srv:   http://localhost:8000/v1/chat/completions     ║${C_RESET}"
-    echo -e "${C_PURPLE}║  ComfyUI:     http://localhost:8188                        ║${C_RESET}"
+    echo -e "${C_PURPLE}║  llama-srv:   http://localhost:18000/v1/chat/completions     ║${C_RESET}"
+    echo -e "${C_PURPLE}║  ComfyUI:     http://localhost:18188                        ║${C_RESET}"
     echo -e "${C_PURPLE}${C_BOLD}╠══════════════════════════════════════════════════════════════╣${C_RESET}"
     echo -e "${C_PURPLE}║  VRAM 分配 ( ${gpu_mem_total} MiB )${C_RESET}"
     echo -e "${C_PURPLE}║    [${C_CYAN}2GB Emb${C_RESET}]${C_GREEN}[${bar}]${C_RESET}"
@@ -951,7 +950,7 @@ cmd_stop() {
     # 2. 停止 ComfyUI
     detail "停止 ComfyUI..."
     local comfyui_pids
-    comfyui_pids=$(pgrep -f "python.*main.py.*8188" 2>/dev/null || true)
+    comfyui_pids=$(pgrep -f "python.*main.py.*18188" 2>/dev/null || true)
     if [[ -n "${comfyui_pids}" ]]; then
         detail "找到 ComfyUI PID: ${comfyui_pids}"
         echo "${comfyui_pids}" | while read -r pid; do
@@ -963,16 +962,16 @@ cmd_stop() {
 
         # 等待进程退出
         local wait_count=0
-        while pgrep -f "python.*main.py.*8188" &>/dev/null && [[ ${wait_count} -lt 15 ]]; do
+        while pgrep -f "python.*main.py.*18188" &>/dev/null && [[ ${wait_count} -lt 15 ]]; do
             sleep 1
             wait_count=$((wait_count + 1))
             echo -n "."
         done
         echo ""
 
-        if pgrep -f "python.*main.py.*8188" &>/dev/null; then
+        if pgrep -f "python.*main.py.*18188" &>/dev/null; then
             warn "ComfyUI 未能在 15 秒内退出，发送 SIGKILL..."
-            pkill -9 -f "python.*main.py.*8188" 2>/dev/null || true
+            pkill -9 -f "python.*main.py.*18188" 2>/dev/null || true
         else
             success "ComfyUI 已停止"
         fi
@@ -1053,17 +1052,17 @@ cmd_status() {
     echo -e "${C_BOLD}${C_CYAN}🎨 ComfyUI 状态${C_RESET}"
     echo -e "${C_CYAN}─────────────────────────────${C_RESET}"
     local comfyui_pid
-    comfyui_pid=$(pgrep -f "python.*main.py.*8188" | head -n1 || true)
+    comfyui_pid=$(pgrep -f "python.*main.py.*18188" | head -n1 || true)
     if [[ -n "${comfyui_pid}" ]]; then
         local comfyui_cpu comfyui_mem
         comfyui_cpu=$(ps -p "${comfyui_pid}" -o %cpu= 2>/dev/null | tr -d ' ' || echo "N/A")
         comfyui_mem=$(ps -p "${comfyui_pid}" -o %mem= 2>/dev/null | tr -d ' ' || echo "N/A")
-        echo -e "Host: localhost:8188  ${C_GREEN}🟢 就绪${C_RESET}"
+        echo -e "Host: localhost:18188  ${C_GREEN}🟢 就绪${C_RESET}"
         echo "PID: ${comfyui_pid}"
         echo "CPU: ${comfyui_cpu}%"
         echo "MEM: ${comfyui_mem}%"
     else
-        echo -e "Host: localhost:8188  ${C_RED}🔴 未运行${C_RESET}"
+        echo -e "Host: localhost:18188  ${C_RED}🔴 未运行${C_RESET}"
     fi
 
     # 4. llama-server 状态
@@ -1071,13 +1070,13 @@ cmd_status() {
     echo -e "${C_BOLD}${C_PURPLE}🧠 llama-server 状态${C_RESET}"
     echo -e "${C_PURPLE}─────────────────────────────${C_RESET}"
     local llama_health llama_mode llama_speed
-    llama_health=$(curl -s --max-time 3 "http://localhost:8000/health" -o /dev/null -w "%{http_code}" 2>/dev/null || echo "000")
+    llama_health=$(curl -s --max-time 3 "http://localhost:18000/health" -o /dev/null -w "%{http_code}" 2>/dev/null || echo "000")
 
     if [[ "${llama_health}" == "200" ]]; then
         echo -e "Health: ${C_GREEN}🟢 /health 返回 200${C_RESET}"
         # 尝试获取更多信息
         local props
-        props=$(curl -s --max-time 3 "http://localhost:8000/props" 2>/dev/null || echo "")
+        props=$(curl -s --max-time 3 "http://localhost:18000/props" 2>/dev/null || echo "")
         if echo "${props}" | grep -q "cuda"; then
             llama_mode="GPU (-ngl 99)"
         else
@@ -1086,7 +1085,7 @@ cmd_status() {
         echo "Mode: ${llama_mode}"
     else
         # 尝试 8080 端口
-        llama_health=$(curl -s --max-time 3 "http://localhost:8080/health" -o /dev/null -w "%{http_code}" 2>/dev/null || echo "000")
+        llama_health=$(curl -s --max-time 3 "http://localhost:18000/health" -o /dev/null -w "%{http_code}" 2>/dev/null || echo "000")
         if [[ "${llama_health}" == "200" ]]; then
             echo -e "Health: ${C_GREEN}🟢 /health 返回 200 (端口 8080)${C_RESET}"
             echo "Mode: GPU (-ngl 99)"

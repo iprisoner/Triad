@@ -146,7 +146,7 @@ function buildDefaultProviders(): ProviderDict {
     qwen: {
       id: "qwen",
       name: "Qwen (本地)",
-      base_url: `http://localhost:${process.env.LLAMA_PORT || "8000"}/v1`,
+      base_url: `http://localhost:${process.env.LLAMA_PORT || "18000"}/v1`,
       api_key: "not-needed",
       context_window: parseInt(process.env.LLAMA_CTX_SIZE || "8192", 10),
       tags: ["local", "privacy", "cost_efficient", "chinese"],

@@ -539,7 +539,7 @@ environment:
 # 手动以管理员运行 PowerShell
 New-NetFirewallRule -DisplayName "Triad-WSL2-8080" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8080
 New-NetFirewallRule -DisplayName "Triad-WSL2-8000" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8000
-New-NetFirewallRule -DisplayName "Triad-WSL2-6333" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 6333
+New-NetFirewallRule -DisplayName "Triad-WSL2-16333" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 16333
 ```
 
 ---
@@ -675,7 +675,7 @@ TRIAD_ROOT=/var/lib/triad bash init.sh
 **用途**: 配置 Windows 到 WSL2 的端口转发
 
 ```bash
-# 配置默认端口 (8080, 8000, 6333, 6379)
+# 配置默认端口 (8080, 8000, 16333, 16379)
 bash bridge/wsl2_gateway.sh setup
 
 # 配置指定端口

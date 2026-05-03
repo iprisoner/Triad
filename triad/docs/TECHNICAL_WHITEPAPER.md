@@ -198,10 +198,10 @@
 
 ```bash
 # 健康检查
-GET http://localhost:8000/health
+GET http://localhost:18000/health
 
 # 聊天补全
-POST http://localhost:8000/v1/chat/completions
+POST http://localhost:18000/v1/chat/completions
 Content-Type: application/json
 {
   "model": "qwen-14b-chat",
@@ -210,22 +210,22 @@ Content-Type: application/json
 }
 
 # 模型信息
-GET http://localhost:8000/v1/models
+GET http://localhost:18000/v1/models
 ```
 
 ### 6.2 ComfyUI API
 
 ```bash
 # 系统状态
-GET http://localhost:8188/system_stats
+GET http://localhost:18188/system_stats
 
 # 提交工作流
-POST http://localhost:8188/prompt
+POST http://localhost:18188/prompt
 Content-Type: application/json
 {"prompt": {...}, "client_id": "triad-001"}
 
 # WebSocket 实时进度
-ws://localhost:8188/ws?clientId=triad-001
+ws://localhost:18188/ws?clientId=triad-001
 ```
 
 ### 6.3 Web UI WebSocket（设计中）
@@ -327,7 +327,7 @@ WSL2 Ubuntu 22.04
 │   └── registry (MCP 注册中心)
 │
 ├── WSL2 宿主机原生
-│   ├── ComfyUI (Python venv, :8188)
+│   ├── ComfyUI (Python venv, :18188)
 │   ├── triad_manager.sh (控制脚本)
 │   └── ~/.triad/memory/ (记忆总线)
 │

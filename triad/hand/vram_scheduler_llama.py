@@ -406,8 +406,8 @@ class LlamaCppProcessManager:
     def __init__(
         self,
         model_path: str,
-        host: str = "127.0.0.1",
-        port: int = 8000,
+        host: str = "0.0.0.0",
+        port: int = 18000,
         gpu_layers: int = 99,
         n_threads: int = 32,
         ctx_size: int = 8192,
@@ -661,8 +661,8 @@ class VRAMScheduler:
             cpu_mgr = CpuAffinityManager()
             llm_manager = LlamaCppProcessManager(
                 model_path=os.getenv("LLAMA_MODEL_PATH", "/mnt/models/qwen-14b-q4_k_m.gguf"),
-                host=os.getenv("LLAMA_HOST", "127.0.0.1"),
-                port=int(os.getenv("LLAMA_PORT", "8000")),
+                host=os.getenv("LLAMA_HOST", "0.0.0.0"),
+                port=int(os.getenv("LLAMA_PORT", "18000")),
                 gpu_layers=int(os.getenv("LLAMA_NGL", "99")),
                 n_threads=int(os.getenv("LLAMA_THREADS", "32")),
                 ctx_size=int(os.getenv("LLAMA_CTX_SIZE", "8192")),
@@ -1130,8 +1130,8 @@ async def _demo_main():
     cpu_mgr = CpuAffinityManager()
     manager = LlamaCppProcessManager(
         model_path="/mnt/models/demo-qwen-14b-q4_k_m.gguf",
-        host="127.0.0.1",
-        port=8000,
+        host="0.0.0.0",
+        port=18000,
         gpu_layers=99,
         n_threads=32,
         ctx_size=8192,

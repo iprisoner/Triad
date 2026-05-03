@@ -51,7 +51,7 @@ npm install
 npm run dev
 ```
 
-默认运行在 http://localhost:5173
+默认运行在 http://localhost:15173
 
 ## 界面布局（扣子风格）
 

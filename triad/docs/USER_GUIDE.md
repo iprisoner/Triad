@@ -25,7 +25,7 @@ Triad 是一台运行在你本地 WSL2 环境中的**多模态 AI 工作站**。
 | **一键全栈启动** | 检查 ComfyUI → 启动 llama-server → Docker 容器群 → WSL2 网关 | `./triad_manager.sh start` |
 | **一键停止** | 优雅关闭所有容器和进程，确保数据写入完毕 | `./triad_manager.sh stop` |
 | **状态监控** | 容器状态 + nvidia-smi 显存 + llama 健康 + Web UI 状态 | `./triad_manager.sh status` |
-| **本地 LLM 推理** | Qwen-14B Q4_K_M，~25 tok/s（GPU 模式），支持 OpenAI 兼容 API | `http://localhost:8000/v1/chat/completions` |
+| **本地 LLM 推理** | Qwen-14B Q4_K_M，~25 tok/s（GPU 模式），支持 OpenAI 兼容 API | `http://localhost:18000/v1/chat/completions` |
 | **显存分时复用** | llama.cpp `-ngl` 跷跷板：渲染时切 CPU（LLM 不中断），渲染完恢复 GPU | 自动调度 |
 | **WSL2 网关** | Windows 浏览器访问 `http://localhost:8080` 直达 WSL2 内部 | `wsl2_gateway.sh setup` |
 | **Web UI 骨架** | 扣子风格界面：左侧对话 + 右侧 Agent 画布/VRAM 面板/配置面板 | `npm run dev` 启动 |
@@ -78,7 +78,7 @@ Triad 是一台运行在你本地 WSL2 环境中的**多模态 AI 工作站**。
 
 **Week 2：玩本地 LLM**
 ```bash
-curl http://localhost:8000/v1/chat/completions \
+curl http://localhost:18000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "qwen-14b-chat", "messages": [{"role": "user", "content": "你好"}]}'
 ```
@@ -89,9 +89,9 @@ curl http://localhost:8000/v1/chat/completions \
 # 启动 ComfyUI（在另一个终端）
 cd ~/.triad/apps/comfyui
 source ~/.triad/venvs/comfyui/bin/activate
-python main.py --listen 0.0.0.0 --port 8188
+python main.py --listen 0.0.0.0 --port 18188
 ```
-浏览器打开 `http://localhost:8188`，手动做一个角色概念图。
+浏览器打开 `http://localhost:18188`，手动做一个角色概念图。
 目标：让 ComfyUI 跑起来，理解它和 Triad 的关系。
 
 **Week 4：看代码，填逻辑**
@@ -157,8 +157,8 @@ chmod +x bridge/wsl2_gateway.sh
 ║              🟣 Triad Control Panel 启动成功              ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  Web UI:     http://localhost:8080/panel                  ║
-║  llama-server: http://localhost:8000/v1/chat/completions ║
-║  ComfyUI:   http://localhost:8188                        ║
+║  llama-server: http://localhost:18000/v1/chat/completions ║
+║  ComfyUI:   http://localhost:18188                        ║
 ╚═══════════════════════════════════════════════════════════╝
 ```
 
@@ -166,7 +166,7 @@ chmod +x bridge/wsl2_gateway.sh
 
 打开 Windows 浏览器，访问：
 - `http://localhost:8080/panel` → Triad Control Panel（扣子风格 Web UI）
-- `http://localhost:8188` → ComfyUI（节点式画图工具）
+- `http://localhost:18188` → ComfyUI（节点式画图工具）
 
 ---
 

@@ -53,7 +53,7 @@ const FILTER_TAGS = [
 const DEFAULT_PROVIDER: Provider = {
   id: '',
   name: '',
-  base_url: 'http://127.0.0.1:8000/v1/chat/completions',
+  base_url: 'http://0.0.0.0:18000/v1/chat/completions',
   api_key: '',
   context_window: 4096,
   tags: [],
@@ -337,7 +337,7 @@ const ProviderForm: React.FC<ProviderFormProps> = ({
           API URL <span className="text-red-500">*</span>
         </Label>
         <Input
-          placeholder="http://127.0.0.1:8000/v1/chat/completions"
+          placeholder="http://0.0.0.0:18000/v1/chat/completions"
           value={value.base_url}
           onChange={(e) => update('base_url', e.target.value)}
           className={cn(errors.base_url && 'border-red-300 focus-visible:ring-red-200')}

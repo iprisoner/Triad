@@ -12,9 +12,9 @@
 #
 # 启动命令:
 #   cd ~/.triad/apps/comfyui && source ~/.triad/venvs/comfyui/bin/activate \
-#       && python main.py --listen 0.0.0.0 --port 8188
+#       && python main.py --listen 0.0.0.0 --port 18188
 #
-# Docker 容器通过 host.docker.internal:8188 访问
+# Docker 容器通过 host.docker.internal:18188 访问
 # =============================================================================
 
 set -euo pipefail
@@ -229,13 +229,13 @@ echo ""
 echo "  2. Start ComfyUI:"
 echo "     source ${VENV_DIR}/bin/activate"
 echo "     cd ${COMFYUI_DIR}"
-echo "     python main.py --listen 0.0.0.0 --port 8188 --preview-method auto --highvram"
+echo "     python main.py --listen 0.0.0.0 --port 18188 --preview-method auto --highvram"
 echo ""
 echo "  3. Docker containers access via:"
-echo "     host.docker.internal:8188"
+echo "     host.docker.internal:18188"
 echo ""
 echo "  4. Open browser at:"
-echo "     http://localhost:8188"
+echo "     http://localhost:18188"
 echo ""
 echo "VRAM mode for 2080Ti 22GB: --highvram (模型常驻 VRAM)"
 echo "If OOM occurs, switch to --normalvram or --lowvram"

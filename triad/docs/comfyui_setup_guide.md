@@ -9,9 +9,9 @@
 1. **启动 ComfyUI**（宿主机原生运行，非 Docker）
    ```bash
    cd ~/ComfyUI
-   python main.py --listen 0.0.0.0 --port 8188
+   python main.py --listen 0.0.0.0 --port 18188
    ```
-2. 浏览器打开 `http://localhost:8188`
+2. 浏览器打开 `http://localhost:18188`
 3. 确保已下载至少一个 **SDXL Checkpoint**（如 `sd_xl_base_1.0.safetensors`），放到 `ComfyUI/models/checkpoints/` 目录
 
 ---

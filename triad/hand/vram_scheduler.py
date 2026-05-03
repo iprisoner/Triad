@@ -250,7 +250,7 @@ class LLMSwapController:
 
     def __init__(
         self,
-        backend_url: str = "http://localhost:8000",
+        backend_url: str = "http://localhost:18000",
         backend_type: str = "vllm",
         warmup_prompt: str = "你好，世界。",
     ):

@@ -98,7 +98,7 @@ class ModelRegistry:
             ),
             "qwen": ProviderConfig(
                 id="qwen", name="Qwen (本地)",
-                base_url=f"http://localhost:{os.getenv('LLAMA_PORT', '8000')}/v1",
+                base_url=f"http://localhost:{os.getenv('LLAMA_PORT', '18000')}/v1",
                 api_key="not-needed",
                 context_window=int(os.getenv("LLAMA_CTX_SIZE", "8192")),
                 tags=["local", "privacy", "cost_efficient", "chinese"],

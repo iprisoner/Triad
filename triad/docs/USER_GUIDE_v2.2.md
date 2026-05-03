@@ -73,7 +73,7 @@ Triad Station 是一台运行在你本地 WSL2 环境中的**多模态 AI 工作
 
 ### 2.3 ComfyUI 画布（Tab 2）
 
-直接嵌入 ComfyUI 网页界面（`http://localhost:8188`）。
+直接嵌入 ComfyUI 网页界面（`http://localhost:18188`）。
 
 **使用流程**：
 1. 在 ComfyUI 中连一个文生图工作流（Checkpoint → CLIP → KSampler → VAE → Save）
@@ -209,7 +209,7 @@ Triad Station 是一台运行在你本地 WSL2 环境中的**多模态 AI 工作
 2. 填写表单：
    - 模型标识：`qwen-local`（唯一 ID）
    - 显示名称：`Qwen 14B 本地`
-   - API URL：`http://127.0.0.1:8000/v1/chat/completions`
+   - API URL：`http://0.0.0.0:18000/v1/chat/completions`
    - API Key：`sk-anything`（本地模型可随便填）
    - 上下文窗口：`8192`
    - 能力标签：`[x] reasoning [x] code [ ] creative`
@@ -290,8 +290,8 @@ nano .env
 ╠═══════════════════════════════════════════════════════════╣
 ║  Web UI:     http://localhost:8080/panel                  ║
 ║  Gateway:    ws://localhost:8080/ws/tasks               ║
-║  llama-server: http://localhost:8000/v1/chat/completions ║
-║  ComfyUI:   http://localhost:8188                        ║
+║  llama-server: http://localhost:18000/v1/chat/completions ║
+║  ComfyUI:   http://localhost:18188                        ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  标签页: [🦞 龙虾控制台] [🎨 ComfyUI] [📊 系统监控]          ║
 ╠═══════════════════════════════════════════════════════════╣

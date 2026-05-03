@@ -152,11 +152,11 @@ services:
 
     environment:
       # ACP (Agent Control Protocol) 监听端口
-      ACP_BIND_ADDR: "0.0.0.0:7001"
+      ACP_BIND_ADDR: "0.0.0.0:17001"
       ACP_WORKERS: "8"                          # 匹配绑定的 8 物理核
 
       # WebSocket / SSE 流式推送
-      WS_BIND_ADDR: "0.0.0.0:7002"
+      WS_BIND_ADDR: "0.0.0.0:17002"
       WS_MAX_CONNECTIONS: "4096"
       WS_HEARTBEAT_INTERVAL_SEC: "30"
 
@@ -167,10 +167,10 @@ services:
 
       # Hermes 认知层连接
       HERMES_AGENT_URL: "http://hermes:8000"
-      HERMES_ACP_ENDPOINT: "tcp://hermes:7001"
+      HERMES_ACP_ENDPOINT: "tcp://hermes:17001"
 
       # MCP Registry 连接
-      MCP_REGISTRY_URL: "http://registry:8500"
+      MCP_REGISTRY_URL: "http://registry:18500"
 
       # 本地 LLM 路由 (单一 llama-server 端点，OpenAI 兼容格式)
       MODEL_API_URL_PRIMARY: "http://llama-server:8080/v1"     # llama.cpp OpenAI 兼容 API
@@ -183,8 +183,8 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: ""
 
     ports:
-      - "7001:7001"      # ACP Agent Control Protocol
-      - "7002:7002"      # WebSocket 流式推送
+      - "17001:17001"      # ACP Agent Control Protocol
+      - "17002:17002"      # WebSocket 流式推送
       - "8080:8080"      # HTTP API / 技能市场 UI
 
     volumes:
@@ -251,7 +251,7 @@ services:
       # ComfyUI 已从 Docker 容器迁移到 WSL2 宿主机原生 venv 运行
       # MCP Bridge 通过 host.docker.internal 访问宿主机 ComfyUI API
       COMFYUI_HOST: "host.docker.internal"
-      COMFYUI_PORT: "8188"
+      COMFYUI_PORT: "18188"
 
       # ===== CUDA / GPU 显存分区配置 =====
       # 魔改 2080Ti 22GB 显存分配策略 (llama.cpp 版)
@@ -272,25 +272,25 @@ services:
 
       # ===== ACP 协议配置 =====
       ACP_LISTEN_HOST: "0.0.0.0"
-      ACP_LISTEN_PORT: "7001"
+      ACP_LISTEN_PORT: "17001"
       ACP_WORKERS: "4"                   # 匹配 Node 0 后 4 核
 
       # ===== MCP (Model Context Protocol) 配置 =====
       MCP_SERVER_HOST: "0.0.0.0"
-      MCP_SERVER_PORT: "8080"
-      MCP_REGISTRY_URL: "http://registry:8500"
+      MCP_SERVER_PORT: "18080"
+      MCP_REGISTRY_URL: "http://registry:18500"
 
       # ===== Embedding 服务配置 (常驻 2GB VRAM) =====
       EMBEDDING_MODEL: "BAAI/bge-large-zh-v1.5"
       EMBEDDING_DEVICE: "cuda"
       EMBEDDING_BATCH_SIZE: "32"
       EMBEDDING_MAX_LENGTH: "512"
-      EMBEDDING_API_PORT: "9000"
+      EMBEDDING_API_PORT: "19000"
       EMBEDDING_API_BIND: "0.0.0.0"
 
       # ===== 记忆管理 (Qdrant 向量数据库) =====
       QDRANT_HOST: "qdrant"
-      QDRANT_PORT: "6333"
+      QDRANT_PORT: "16333"
       QDRANT_COLLECTION_NAME: "hermes-memory"
       QDRANT_VECTOR_SIZE: "1024"         # bge-large 输出维度
 
@@ -322,7 +322,7 @@ services:
 
     ports:
       - "8000:8000"      # Hermes HTTP API
-      - "9000:9000"      # Embedding 推理 API (内部高频调用)
+      - "19000:19000"      # Embedding 推理 API (内部高频调用)
 
     volumes:
       - hermes-memory:/app/memory
@@ -367,8 +367,8 @@ services:
           memory: 2G
 
     environment:
-      QDRANT__SERVICE__HTTP_PORT: "6333"
-      QDRANT__SERVICE__GRPC_PORT: "6334"
+      QDRANT__SERVICE__HTTP_PORT: "16333"
+      QDRANT__SERVICE__GRPC_PORT: "16334"
       # 启用内存映射以处理超内存集合
       QDRANT__STORAGE__STORAGE_PATH: "/qdrant/storage"
       QDRANT__STORAGE__SNAPSHOTS_PATH: "/qdrant/snapshots"
@@ -380,14 +380,14 @@ services:
       - qdrant-storage:/qdrant/storage
 
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "16333:16333"
+      - "16334:16334"
 
     networks:
       - triad-data
 
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      test: ["CMD", "curl", "-f", "http://localhost:16333/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -417,13 +417,13 @@ services:
           memory: 256M
 
     environment:
-      REGISTRY_BIND: "0.0.0.0:8500"
+      REGISTRY_BIND: "0.0.0.0:18500"
       REGISTRY_HEARTBEAT_SEC: "30"
       REGISTRY_TTL_SEC: "300"
       MCP_PROTOCOL_VERSION: "2024-11-05"
 
     ports:
-      - "8500:8500"
+      - "18500:18500"
 
     volumes:
       - registry-data:/data
@@ -432,7 +432,7 @@ services:
       - triad-core
 
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8500/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:18500/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -487,7 +487,7 @@ services:
       -np 4
 
     ports:
-      - "8080:8080"
+      - "18000:8080"
 
     volumes:
       # GGUF 模型文件挂载: 宿主机 ~/.triad/models/ → 容器 /models
@@ -581,11 +581,11 @@ services:
       
       # ComfyUI 宿主机连接 (原生 venv 模式)
       COMFYUI_HOST: "host.docker.internal"
-      COMFYUI_PORT: "8188"
+      COMFYUI_PORT: "18188"
       
       # 任务通信
-      TASK_BROKER_URL: "http://openclaw:7001"
-      EMBEDDING_API_URL: "http://hermes:9000"
+      TASK_BROKER_URL: "http://openclaw:17001"
+      EMBEDDING_API_URL: "http://hermes:19000"
 
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -665,13 +665,13 @@ services:
 
       # ComfyUI 宿主机连接 (原生 venv 模式)
       COMFYUI_HOST: "host.docker.internal"
-      COMFYUI_PORT: "8188"
+      COMFYUI_PORT: "18188"
 
       CUDA_VISIBLE_DEVICES: "0"
       NVIDIA_VISIBLE_DEVICES: "0"
 
-      TASK_BROKER_URL: "http://openclaw:7001"
-      EMBEDDING_API_URL: "http://hermes:9000"
+      TASK_BROKER_URL: "http://openclaw:17001"
+      EMBEDDING_API_URL: "http://hermes:19000"
       LOCAL_LLM_URL: "http://llama-server:8080/v1/chat/completions"
 
     extra_hosts:
@@ -753,7 +753,7 @@ services:
 
       # ComfyUI 宿主机连接 (原生 venv 模式)
       COMFYUI_HOST: "host.docker.internal"
-      COMFYUI_PORT: "8188"
+      COMFYUI_PORT: "18188"
 
       CUDA_VISIBLE_DEVICES: "0"
       NVIDIA_VISIBLE_DEVICES: "0"
@@ -851,7 +851,7 @@ services:
 #   启动: 核心服务 + llama-server (GPU 模式)
 #
 # 仅渲染:        docker compose --profile render up -d
-#   启动: 核心服务 (ComfyUI 在宿主机手动启动: ~/.triad/apps/comfyui/python main.py --listen 0.0.0.0 --port 8188)
+#   启动: 核心服务 (ComfyUI 在宿主机手动启动: ~/.triad/apps/comfyui/python main.py --listen 0.0.0.0 --port 18188)
 #
 # 调试模式:      docker compose --profile debug up -d
 #   启动: 核心服务 + llama-server + text-generation-webui

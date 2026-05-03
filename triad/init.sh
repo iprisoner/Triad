@@ -572,8 +572,8 @@ TRIAD_RUNTIME_MODE=$([[ "$GPU_AVAILABLE" == true ]] && echo "gpu" || echo "cpu")
 # --- 服务端口（宿主机映射） ---
 CLAWPANEL_PORT=8080
 API_PORT=8000
-VECTOR_DB_PORT=6333
-REDIS_PORT=6379
+VECTOR_DB_PORT=16333
+REDIS_PORT=16379
 
 # --- 模型配置 ---
 # 根据显存自动选择默认模型

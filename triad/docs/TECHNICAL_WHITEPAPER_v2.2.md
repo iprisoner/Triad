@@ -36,7 +36,7 @@
 │  └─ WebSocket: ws://localhost:8080/ws/tasks (实时双向通信)                      │
 │                                                                              │
 │  Tab 2: ComfyUI 画布 (iframe, display:none 切换, DOM 永不卸载)                  │
-│  └─ http://localhost:8188 (宿主机原生 Python venv)                             │
+│  └─ http://localhost:18188 (宿主机原生 Python venv)                             │
 │                                                                              │
 │  Tab 3: 系统监控 (3秒轮询 /api/system/status)                                   │
 │  └─ GPU 显存条 / Docker 容器列表 / llama 状态 / CPU+内存卡片                    │
@@ -70,7 +70,7 @@
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           多模态执行层                                          │
 │  ├─ llama-server (Docker)   : -ngl 99/0 GPU/CPU 跷跷板 (:8000)                │
-│  ├─ ComfyUI (宿主机 venv)   : SDXL + InstantID + SVD (:8188)                   │
+│  ├─ ComfyUI (宿主机 venv)   : SDXL + InstantID + SVD (:18188)                   │
 │  ├─ comfyui_mcp_bridge.py   : API JSON 参数注入 + WebSocket 轮询               │
 │  ├─ vram_scheduler_llama.py : 显存状态机 (IDLE→CPU_FALLBACK→RENDERING)          │
 │  └─ asset_manager.py        : asset:// URI + 版本链 + 缩略图                   │
@@ -92,7 +92,7 @@
     <LobsterConsole />
 </div>
 <div className={cn('absolute inset-0', activeTab==='comfyui'?'block':'hidden')}>
-    <iframe src="http://localhost:8188" />  // DOM 永不卸载
+    <iframe src="http://localhost:18188" />  // DOM 永不卸载
 </div>
 <div className={cn('absolute inset-0', activeTab==='monitor'?'block':'hidden')}>
     <SystemMonitorTab />
@@ -189,7 +189,7 @@ except ValueError as e:
 |------|---------|---------|
 | GPU 显存/利用率/温度 | `nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu --format=csv,noheader,nounits` | 返回 "GPU 不可用" |
 | Docker 容器 | `docker ps --format "{{.Names}}|{{.Status}}|{{.Ports}}"` | 空数组 |
-| llama-server | `curl -s http://localhost:8000/health` | `running: false` |
+| llama-server | `curl -s http://localhost:18000/health` | `running: false` |
 | CPU 占用 | `top -bn1` | `os.loadavg()` |
 | 内存占用 | `free -m` | `os.totalmem()/freemem()` |
 
@@ -343,7 +343,7 @@ new_recipe = crystallizer.evolve_from_recipe(
             → reporter.report_model_info("grok", "grok-beta", 42, 2048)
           → _get_eval_strategy("novel", role, ...) → "novel"
             → curator.evaluate("第一章内容", use_llm=True)
-            → _local_llm_assess() → POST http://127.0.0.1:8000/v1/chat/completions
+            → _local_llm_assess() → POST http://0.0.0.0:18000/v1/chat/completions
             → EvaluationResult(人设8.5/逻辑9.0/节奏7.0/伏笔8.5)
             → reporter.report_stage("TESTING", "评估: 人设 8.5/10", 0.7)
             → overall >= 7.5 → crystallize_skill() → 写入 self-evolved/
@@ -369,7 +369,7 @@ new_recipe = crystallizer.evolve_from_recipe(
   → comfy_bridge.generate_character_concept()
     → _load_api_workflow("character_concept")
     → _inject_prompt_to_workflow(positive_prompt, negative_prompt, seed)
-    → aiohttp POST → http://host.docker.internal:8188/prompt
+    → aiohttp POST → http://host.docker.internal:18188/prompt
     → WebSocket 轮询 → 获取 filename
     → 下载图像 → assets/faces/alice_v1.png
   → vram_scheduler.release_render_memory()
@@ -520,7 +520,7 @@ ws://localhost:8080/ws/tasks
 ### 6.3 本地 LLM API
 
 ```
-POST http://localhost:8000/v1/chat/completions
+POST http://localhost:18000/v1/chat/completions
 {"model":"qwen-14b-chat","messages":[{"role":"user","content":"Hello"}],"temperature":0.7}
 ```
 

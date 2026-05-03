@@ -737,7 +737,7 @@ class NovelCurator:
         self,
         model_router: Optional[ModelRouter] = None,
         save_dir: Optional[Path] = None,
-        local_evaluator_url: str = "http://127.0.0.1:8000/v1/chat/completions",
+        local_evaluator_url: str = "http://0.0.0.0:18000/v1/chat/completions",
         local_evaluator_model: str = "qwen-14b-chat",
         use_local_first: bool = True,
     ):
@@ -1370,7 +1370,7 @@ class NovelCurator:
 def create_novel_curator(
     model_router: Optional[ModelRouter] = None,
     save_dir: Optional[Path] = None,
-    local_evaluator_url: str = "http://127.0.0.1:8000/v1/chat/completions",
+    local_evaluator_url: str = "http://0.0.0.0:18000/v1/chat/completions",
     local_evaluator_model: str = "qwen-14b-chat",
     use_local_first: bool = True,
 ) -> NovelCurator:

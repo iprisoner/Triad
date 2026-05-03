@@ -27,7 +27,7 @@ const mockProviders: Provider[] = [
   {
     id: 'qwen-local',
     name: 'Qwen 14B Local',
-    base_url: 'http://127.0.0.1:8000/v1/chat/completions',
+    base_url: 'http://0.0.0.0:18000/v1/chat/completions',
     api_key: 'local-no-key',
     context_window: 4096,
     tags: ['chinese', 'code'],

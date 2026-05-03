@@ -69,7 +69,7 @@ logger = logging.getLogger("triad.comfyui_mcp_bridge")
 # ---------------------------------------------------------------------------
 
 COMFYUI_DEFAULT_HOST = os.getenv("COMFYUI_HOST", "host.docker.internal")
-COMFYUI_DEFAULT_PORT = int(os.getenv("COMFYUI_PORT", "8188"))
+COMFYUI_DEFAULT_PORT = int(os.getenv("COMFYUI_PORT", "18188"))
 COMFYUI_WS_TIMEOUT = 300  # 5 分钟
 
 # VRAM 预算估算（MB）
@@ -375,8 +375,8 @@ class ComfyUIClient:
         """
         检查 ComfyUI 宿主机服务是否可达。
         
-        ComfyUI 在 WSL2 宿主机以原生 Python venv 运行，监听 0.0.0.0:8188。
-        Docker 容器通过 host.docker.internal:8188 访问。
+        ComfyUI 在 WSL2 宿主机以原生 Python venv 运行，监听 0.0.0.0:18188。
+        Docker 容器通过 host.docker.internal:18188 访问。
         
         Returns:
             {"ok": True, "system_stats": {...}} 或 {"ok": False, "error": "..."}
@@ -398,7 +398,7 @@ class ComfyUIClient:
                     f"Cannot connect to ComfyUI at {self.base_url}. "
                     f"Ensure ComfyUI is running on the WSL2 host: "
                     f"cd ~/.triad/apps/comfyui && source ~/.triad/venvs/comfyui/bin/activate && "
-                    f"python main.py --listen 0.0.0.0 --port 8188"
+                    f"python main.py --listen 0.0.0.0 --port 18188"
                 ),
             }
         except Exception as e:
@@ -1551,7 +1551,7 @@ async def _demo_main():
     # 创建 Bridge（不连接真实 ComfyUI）
     bridge = ComfyUIMCPBridge(
         comfy_host="host.docker.internal",
-        comfy_port=8188,
+        comfy_port=18188,
     )
 
     # 列出可用工具

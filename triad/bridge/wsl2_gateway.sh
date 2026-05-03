@@ -50,7 +50,7 @@ show_help() {
 用法: ./wsl2_gateway.sh [命令] [选项]
 
 命令:
-  setup [端口...]  配置端口转发（默认: 8080 8000 6333 6379）
+  setup [端口...]  配置端口转发（默认: 8080 8000 16333 16379）
   status          查看当前 WSL2 IP、端口转发状态和防火墙规则
   clean [端口...]  清理端口转发规则（默认清理所有 Triad 端口）
   auto            自动检测 Triad Docker 容器并配置对应端口
@@ -430,8 +430,8 @@ show_diagnostics() {
 
     echo ""
     echo -e "${BOLD}端口监听状态（WSL2 侧）:${NC}"
-    ss -tlnp 2>/dev/null | grep -E 'State|8080|8000|6333|6379' | sed 's/^/  /' || \
-    netstat -tlnp 2>/dev/null | grep -E 'Proto|8080|8000|6333|6379' | sed 's/^/  /' || \
+    ss -tlnp 2>/dev/null | grep -E 'State|8080|8000|16333|16379' | sed 's/^/  /' || \
+    netstat -tlnp 2>/dev/null | grep -E 'Proto|8080|8000|16333|16379' | sed 's/^/  /' || \
     log_warn "ss/netstat 不可用"
 }
 
@@ -440,7 +440,7 @@ show_diagnostics() {
 # =============================================================================
 
 # --- 默认配置 ---
-readonly DEFAULT_PORTS=(8080 8000 6333 6379)
+readonly DEFAULT_PORTS=(8080 8000 16333 16379)
 TRIAD_PORTS=()
 
 # 从环境变量读取端口
@@ -497,8 +497,8 @@ case "$CMD" in
             case "$port" in
                 8080) echo -e "  ClawPanel 前端:   ${CYAN}http://localhost:8080${NC}" ;;
                 8000) echo -e "  Triad API:        ${CYAN}http://localhost:8000${NC}" ;;
-                6333) echo -e "  Qdrant VectorDB:  ${CYAN}http://localhost:6333${NC}" ;;
-                6379) echo -e "  Redis:            ${CYAN}redis://localhost:6379${NC}" ;;
+                16333) echo -e "  Qdrant VectorDB:  ${CYAN}http://localhost:16333${NC}" ;;
+                16379) echo -e "  Redis:            ${CYAN}redis://localhost:16379${NC}" ;;
                 *)    echo -e "  服务端口:         ${CYAN}http://localhost:${port}${NC}" ;;
             esac
         done

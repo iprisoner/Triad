@@ -2,7 +2,7 @@
 
 ## 概述
 
-本手册描述如何在 WSL2 Ubuntu 宿主机上以原生 Python venv 方式部署 ComfyUI，替代原有的 Docker 容器方案。MCP Bridge（在 Docker 内）通过 `host.docker.internal:8188` 访问宿主机 ComfyUI。
+本手册描述如何在 WSL2 Ubuntu 宿主机上以原生 Python venv 方式部署 ComfyUI，替代原有的 Docker 容器方案。MCP Bridge（在 Docker 内）通过 `host.docker.internal:18188` 访问宿主机 ComfyUI。
 
 ## 为何从 Docker 迁移到宿主机原生
 
@@ -38,19 +38,19 @@
 │       ├── vae/                                                              │
 │       └── insightface/ (InstantID 面部模型)                                  │
 │                                                                             │
-│   python main.py --listen 0.0.0.0 --port 8188 --highvram                   │
+│   python main.py --listen 0.0.0.0 --port 18188 --highvram                   │
 │        ▲                                                                    │
-│        └────────────────────── 监听 0.0.0.0:8188 ────────────────────────────┘
+│        └────────────────────── 监听 0.0.0.0:18188 ────────────────────────────┘
 │                                                                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                           Docker 容器网络层                                  │
 │                                                                             │
 │   triad-hermes (Docker)                                                     │
-│   └── comfyui_mcp_bridge.py ──► http://host.docker.internal:8188/prompt   │
+│   └── comfyui_mcp_bridge.py ──► http://host.docker.internal:18188/prompt   │
 │                                  host.docker.internal ──► WSL2 宿主机 127.0.0.1│
 │                                                                             │
 │   triad-clawpod-* (Docker)                                                  │
-│   └── 如需访问 ComfyUI ───────► host.docker.internal:8188                  │
+│   └── 如需访问 ComfyUI ───────► host.docker.internal:18188                  │
 │                                                                             │
 │   所有容器配置 extra_hosts:                                                 │
 │   - "host.docker.internal:host-gateway"                                     │
@@ -108,20 +108,20 @@ source ~/.triad/venvs/comfyui/bin/activate
 cd ~/.triad/apps/comfyui
 
 # 启动 (高显存模式，适合 2080Ti 22GB)
-python main.py --listen 0.0.0.0 --port 8188 --preview-method auto --highvram
+python main.py --listen 0.0.0.0 --port 18188 --preview-method auto --highvram
 
 # 如果显存不足，使用标准模式
-# python main.py --listen 0.0.0.0 --port 8188 --preview-method auto --normalvram
+# python main.py --listen 0.0.0.0 --port 18188 --preview-method auto --normalvram
 
 # 如果仍然 OOM，使用低显存模式 (模型分片加载)
-# python main.py --listen 0.0.0.0 --port 8188 --preview-method auto --lowvram
+# python main.py --listen 0.0.0.0 --port 18188 --preview-method auto --lowvram
 ```
 
 启动参数说明：
 | 参数 | 说明 |
 |------|------|
 | `--listen 0.0.0.0` | 监听所有接口，允许 Docker 容器访问 |
-| `--port 8188` | 默认端口，与 MCP Bridge 配置一致 |
+| `--port 18188` | 默认端口，与 MCP Bridge 配置一致 |
 | `--preview-method auto` | 自动选择预览方法 |
 | `--highvram` | 高显存模式，模型常驻 VRAM (推荐 22GB) |
 | `--normalvram` | 标准模式，需要时加载模型 (推荐 12-16GB) |
@@ -133,11 +133,11 @@ python main.py --listen 0.0.0.0 --port 8188 --preview-method auto --highvram
 ```bash
 # 从 Docker 容器内部测试连通性
 docker run --rm --add-host=host.docker.internal:host-gateway alpine \
-    sh -c "apk add --no-cache curl && curl -s http://host.docker.internal:8188/system_stats"
+    sh -c "apk add --no-cache curl && curl -s http://host.docker.internal:18188/system_stats"
 
 # 或进入 triad-hermes 容器测试
 docker compose -f docker-compose.hpc.yml exec hermes \
-    sh -c "apt-get update -qq && apt-get install -y -qq curl && curl -s http://host.docker.internal:8188/system_stats"
+    sh -c "apt-get update -qq && apt-get install -y -qq curl && curl -s http://host.docker.internal:18188/system_stats"
 ```
 
 ### 步骤 5: 启动 Triad Docker 服务
@@ -158,12 +158,12 @@ docker compose -f docker-compose.hpc.yml up -d
 1. WSL2 宿主机: 启动 ComfyUI
    source ~/.triad/venvs/comfyui/bin/activate
    cd ~/.triad/apps/comfyui
-   python main.py --listen 0.0.0.0 --port 8188 --highvram
+   python main.py --listen 0.0.0.0 --port 18188 --highvram
 
 2. WSL2 宿主机: 启动 Triad Docker 服务
    docker compose -f docker-compose.hpc.yml --profile hpc-full up -d
 
-3. Docker 容器: MCP Bridge 自动连接 host.docker.internal:8188
+3. Docker 容器: MCP Bridge 自动连接 host.docker.internal:18188
 ```
 
 ### 停止顺序
@@ -201,14 +201,14 @@ pip install -r requirements.txt  # 如果在 venv 内
 
 ## 故障排查
 
-### 问题 1: Docker 容器无法连接 host.docker.internal:8188
+### 问题 1: Docker 容器无法连接 host.docker.internal:18188
 
-**症状**: MCP Bridge 报错 `Cannot connect to ComfyUI at http://host.docker.internal:8188`
+**症状**: MCP Bridge 报错 `Cannot connect to ComfyUI at http://host.docker.internal:18188`
 
 **排查步骤**:
 ```bash
 # 1. 确认 ComfyUI 在宿主机运行
-curl http://localhost:8188/system_stats
+curl http://localhost:18188/system_stats
 
 # 2. 确认 Docker 容器能解析 host.docker.internal
 docker run --rm --add-host=host.docker.internal:host-gateway alpine \
@@ -264,10 +264,10 @@ nvidia-smi
 **解决方案**:
 ```bash
 # 使用更低的显存模式
-python main.py --listen 0.0.0.0 --port 8188 --normalvram
+python main.py --listen 0.0.0.0 --port 18188 --normalvram
 
 # 或低显存模式
-python main.py --listen 0.0.0.0 --port 8188 --lowvram
+python main.py --listen 0.0.0.0 --port 18188 --lowvram
 
 # 同时确保 llama-server 已切换到 CPU 模式 (-ngl 0) 释放显存
 ```
@@ -280,7 +280,7 @@ python main.py --listen 0.0.0.0 --port 8188 --lowvram
 ```bash
 # 查看详细错误日志
 cd ~/.triad/apps/comfyui
-python main.py --listen 0.0.0.0 --port 8188 2>&1 | tee comfyui.log
+python main.py --listen 0.0.0.0 --port 18188 2>&1 | tee comfyui.log
 
 # 常见原因：缺少依赖
 cd custom_nodes/<失败节点目录>
@@ -307,7 +307,7 @@ ls -la ~/.triad/models/comfyui/checkpoints/
 | 变量 | 设置位置 | 值 | 说明 |
 |------|---------|-----|------|
 | `COMFYUI_HOST` | `docker-compose.hpc.yml` (hermes, clawpod-*) | `host.docker.internal` | MCP Bridge 连接目标 |
-| `COMFYUI_PORT` | `docker-compose.hpc.yml` (hermes, clawpod-*) | `8188` | ComfyUI 监听端口 |
+| `COMFYUI_PORT` | `docker-compose.hpc.yml` (hermes, clawpod-*) | `18188` | ComfyUI 监听端口 |
 | `CUDA_VISIBLE_DEVICES` | `docker-compose.hpc.yml` | `0` | 指定 GPU 设备 |
 | `extra_hosts` | `docker-compose.hpc.yml` | `host.docker.internal:host-gateway` | DNS 解析保障 |
 
@@ -319,7 +319,7 @@ ls -la ~/.triad/models/comfyui/checkpoints/
 # 推荐启动命令 (22GB 高显存)
 python main.py \
     --listen 0.0.0.0 \
-    --port 8188 \
+    --port 18188 \
     --preview-method auto \
     --highvram \
     --disable-xformers \
@@ -336,7 +336,7 @@ python main.py \
 # 2. 启动 ComfyUI 高显存模式
 source ~/.triad/venvs/comfyui/bin/activate
 cd ~/.triad/apps/comfyui
-python main.py --listen 0.0.0.0 --port 8188 --highvram
+python main.py --listen 0.0.0.0 --port 18188 --highvram
 
 # 3. 渲染完成后，停止 ComfyUI (释放显存给 llama-server GPU 模式)
 #    Ctrl+C 或 kill <pid>

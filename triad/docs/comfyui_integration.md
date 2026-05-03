@@ -30,7 +30,7 @@
                               │                         │                         │
                               v                         v                         v
                          pynvml / NVML           ComfyUI Server            ~/.triad/memory/
-                         LLM Swap Controller       (8188 / ws)             assets/
+                         LLM Swap Controller       (18188 / ws)             assets/
 ```
 
 ---
@@ -104,7 +104,7 @@ python -m vllm.entrypoints.openai.api_server \
 cd ~/ComfyUI
 python main.py \
   --listen 127.0.0.1 \
-  --port 8188 \
+  --port 18188 \
   --disable-xformers \      # 如果 xformers 导致问题
   &
 
@@ -434,11 +434,11 @@ if event_type == 1:
 
 ```bash
 # 检查 ComfyUI 是否监听正确端口
-curl http://127.0.0.1:8188/system_stats
+curl http://127.0.0.1:18188/system_stats
 # 应返回 GPU / 内存统计
 
 # 检查 WebSocket
-wscat -c ws://127.0.0.1:8188/ws
+wscat -c ws://127.0.0.1:18188/ws
 ```
 
 ### 8.2 VRAM 不足（OOM）
@@ -448,10 +448,10 @@ wscat -c ws://127.0.0.1:8188/ws
 python -c "from vram_scheduler import NVMLMonitor; m=NVMLMonitor(); print(m.snapshot())"
 
 # 2. 手动释放 ComfyUI 显存
-curl -X POST http://127.0.0.1:8188/free -H "Content-Type: application/json" -d '{"unload_models":true,"free_memory":true}'
+curl -X POST http://127.0.0.1:18188/free -H "Content-Type: application/json" -d '{"unload_models":true,"free_memory":true}'
 
 # 3. 手动卸载 vLLM
-curl -X POST http://127.0.0.1:8000/v1/unload
+curl -X POST http://0.0.0.0:18000/v1/unload
 ```
 
 ### 8.3 模型加载失败
@@ -486,7 +486,7 @@ python main.py \
   --cuda-malloc \             # 启用 CUDA 内存池
   --disable-smart-memory \    # 禁用智能内存（避免与 vram_scheduler 冲突）
   --listen 127.0.0.1 \
-  --port 8188
+  --port 18188
 ```
 
 ### 9.2 SVD 视频生成参数
@@ -517,7 +517,7 @@ warmup_prompt = "System prompt initialization."  # 短提示词 = 更快加载
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `COMFYUI_HOST` | `127.0.0.1` | ComfyUI 监听地址 |
-| `COMFYUI_PORT` | `8188` | ComfyUI 端口 |
+| `COMFYUI_PORT` | `18188` | ComfyUI 端口 |
 | `TTS_API_URL` | `http://localhost:5000/tts` | TTS 服务地址 |
 | `TRIAD_ASSETS_PATH` | `~/.triad/memory/assets` | 资产库存储路径 |
 | `TRIAD_WORKFLOWS_PATH` | `~/.triad/workflows` | 工作流模板路径 |

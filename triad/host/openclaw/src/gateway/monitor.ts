@@ -176,7 +176,7 @@ async function getLlamaStatus(): Promise<LlamaServerStatus> {
     try {
         // 1) 先探测 /health 端点确认存活
         const { stdout } = await execAsync(
-            'curl -s http://localhost:8000/health',
+            'curl -s http://localhost:18000/health',
             { timeout: 3000 },
         );
         const healthData = JSON.parse(stdout);
@@ -192,7 +192,7 @@ async function getLlamaStatus(): Promise<LlamaServerStatus> {
 
         try {
             const { stdout: slotStdout } = await execAsync(
-                'curl -s http://localhost:8000/slots',
+                'curl -s http://localhost:18000/slots',
                 { timeout: 3000 },
             );
             const slotsData = JSON.parse(slotStdout);
