@@ -1,1296 +1,1492 @@
 #!/bin/bash
-
 ###############################################################################
-# Triad Manager - 三层 AI Agent 系统一键部署与启停脚本
-# Version: 1.0.0
-# Author: Triad Engineering Team
-# Date: 2025-01-20
-#
-# 硬件配置:
-#   - 双路 E5-2673v3 (24C/48T)
-#   - 魔改 2080Ti 22GB
-#   - WSL2 Ubuntu 22.04
-#
-# 网络环境:
-#   - 河南节点，国内网络
-#   - Docker Hub / npm / HuggingFace 使用国内镜像源
-#
-# Usage:
-#   ./triad_manager.sh install   # 一键安装环境
-#   ./triad_manager.sh start     # 一键启动全站
-#   ./triad_manager.sh stop      # 一键停止
-#   ./triad_manager.sh status    # 状态查看
-#   ./triad_manager.sh restart   # 重启
-#   ./triad_manager.sh logs      # 查看日志
+# triad_manager.sh v2.2
+# 一键部署脚本：原生 Ubuntu 22.04 (WSL2) + 单卡魔改 RTX 2080Ti 22GB
+# 功能：安装 / 启动 / 停止 / 状态 / 日志 / 更新
+# 作者：Triad Dev Team
+# 日期：2025-01
 ###############################################################################
 
+# 严格模式与全局配置
 set -euo pipefail
-shopt -s inherit_errexit 2>/dev/null || true
+IFS=$'\n\t'
 
-###############################################################################
-# 全局常量
-###############################################################################
-
-readonly SCRIPT_VERSION="1.0.0"
-readonly SCRIPT_NAME="$(basename "$0")"
+# 脚本元信息
+readonly SCRIPT_VERSION="2.2"
+readonly SCRIPT_NAME="triad_manager.sh"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly TRIAD_ROOT="${SCRIPT_DIR}"
 
-readonly TRIAD_ROOT="${HOME}/.triad"
-readonly TRIAD_APPS="${TRIAD_ROOT}/apps"
-readonly TRIAD_MODELS="${TRIAD_ROOT}/models"
-readonly TRIAD_LOGS="${TRIAD_ROOT}/logs"
-readonly TRIAD_VENVS="${TRIAD_ROOT}/venvs"
-readonly TRIAD_CONFIG="${TRIAD_ROOT}/.env"
+# 数据盘挂载点（双 NVMe 优化：模型与大数据放数据盘）
+readonly DATA_DISK="/mnt/data"
+readonly USE_DATA_DISK=1
 
-readonly COMFYUI_DIR="${TRIAD_APPS}/comfyui"
-readonly COMFYUI_VENV="${TRIAD_VENVS}/comfyui"
-readonly COMFYUI_LOG="${TRIAD_LOGS}/comfyui.log"
+# 服务端口配置（全部大端口号 +10000）
+readonly OPENCLAW_PORT=18080
+readonly HERMES_PORT=18000
+readonly LLAMA_PORT=18000
+readonly COMFYUI_PORT=18188
+readonly QDRANT_HTTP_PORT=16333
+readonly QDRANT_GRPC_PORT=16334
+readonly EMBEDDING_API_PORT=19000
+readonly MCP_SERVER_PORT=18500
+readonly BIND_ADDRESS="0.0.0.0"
 
-readonly LLAMA_MODEL_NAME="qwen-14b-chat-q4_k_m.gguf"
-readonly LLAMA_MODEL_URL="https://hf-mirror.com/Qwen/Qwen-14B-Chat-GGUF/resolve/main/${LLAMA_MODEL_NAME}"
-readonly LLAMA_MODEL_PATH="${TRIAD_MODELS}/${LLAMA_MODEL_NAME}"
+# 模型配置
+readonly MODEL_NAME="Qwen-14B-Chat"
+readonly MODEL_GGUF_URL="https://hf-mirror.com/Qwen/Qwen-14B-Chat-GGUF/resolve/main/qwen-14b-chat-q4_k_m.gguf"
+readonly MODEL_GGUF_FILENAME="qwen-14b-chat-q4_k_m.gguf"
+readonly LLAMA_CPP_REPO="https://ghproxy.com/https://github.com/ggerganov/llama.cpp.git"
 
-readonly HF_ENDPOINT_URL="https://hf-mirror.com"
+# 国内镜像源配置
+readonly PIP_INDEX_URL="https://mirrors.aliyun.com/pypi/simple/"
+readonly PIP_TRUSTED_HOST="mirrors.aliyun.com"
 readonly NPM_REGISTRY="https://registry.npmmirror.com"
-readonly UBUNTU_MIRROR="mirrors.tuna.tsinghua.edu.cn"
 
-###############################################################################
-# 颜色输出
-###############################################################################
+# 安装标记文件
+readonly INSTALL_FLAG="${TRIAD_ROOT}/.triad_installed"
+readonly ENV_FILE="${TRIAD_ROOT}/.env"
 
+# 日志配置
+readonly LOG_DIR="${TRIAD_ROOT}/logs"
+readonly INSTALL_LOG="${LOG_DIR}/install.log"
+readonly RUN_LOG="${LOG_DIR}/runtime.log"
+
+# 颜色常量与输出函数
+# 颜色定义
+readonly C_RESET='\033[0m'
 readonly C_RED='\033[0;31m'
 readonly C_GREEN='\033[0;32m'
-readonly C_YELLOW='\033[1;33m'
+readonly C_YELLOW='\033[0;33m'
 readonly C_BLUE='\033[0;34m'
 readonly C_CYAN='\033[0;36m'
-readonly C_PURPLE='\033[0;35m'
 readonly C_BOLD='\033[1m'
-readonly C_RESET='\033[0m'
 
-info()    { echo -e "${C_BLUE}[INFO]${C_RESET}  $*"; }
-success() { echo -e "${C_GREEN}[OK]${C_RESET}    $*"; }
-warn()    { echo -e "${C_YELLOW}[WARN]${C_RESET}  $*" >&2; }
-error()   { echo -e "${C_RED}[ERROR]${C_RESET} $*" >&2; }
-fatal()   { echo -e "${C_RED}[FATAL]${C_RESET} $*" >&2; exit 1; }
-step()    { echo -e "\n${C_BOLD}${C_CYAN}▶ $*${C_RESET}"; }
-detail()  { echo -e "${C_PURPLE}  → $*${C_RESET}"; }
+# 输出函数：信息
+info() { echo -e "${C_BLUE}[INFO]${C_RESET} $1"; }
 
-###############################################################################
-# 错误处理与信号捕获
-###############################################################################
+# 输出函数：成功
+ok() { echo -e "${C_GREEN}[OK]${C_RESET} $1"; }
 
-cleanup_on_error() {
-    local exit_code=$?
-    local line_no=$1
-    if [[ $exit_code -ne 0 ]]; then
-        error "脚本在第 ${line_no} 行失败，退出码: ${exit_code}"
-        echo ""
-        warn "修复建议:"
-        warn "  1. 检查上方错误信息"
-        warn "  2. 确认 Docker 服务运行:  sudo systemctl status docker"
-        warn "  3. 确认 NVIDIA 驱动:    nvidia-smi"
-        warn "  4. 查看日志:             ./${SCRIPT_NAME} logs all"
-        warn "  5. 重置环境:             ./${SCRIPT_NAME} install (会保留已下载的模型)"
-        echo ""
-        exit "${exit_code}"
-    fi
-}
-trap 'cleanup_on_error $LINENO' ERR
+# 输出函数：警告
+warn() { echo -e "${C_YELLOW}[WARN]${C_RESET} $1"; }
 
-cleanup_on_exit() {
-    local exit_code=$?
-    # 正常退出不做额外处理
-    exit "${exit_code}"
-}
-trap cleanup_on_exit EXIT
+# 输出函数：错误
+err() { echo -e "${C_RED}[ERROR]${C_RESET} $1" >&2; }
 
-###############################################################################
-# 工具函数
-###############################################################################
-
-cmd_exists() {
-    command -v "$1" &>/dev/null
+# 输出函数：步骤标题
+step() {
+    local num="$1"
+    local title="$2"
+    echo -e "${C_BOLD}${C_CYAN} 步骤 ${num}: ${title}${C_RESET}"
 }
 
-require_cmd() {
-    local cmd=$1
-    local install_hint=${2:-"请安装 ${cmd}"}
-    if ! cmd_exists "${cmd}"; then
-        fatal "缺少必需命令: ${cmd}\n修复: ${install_hint}"
-    fi
+# 输出函数：分隔线
+line() {
+echo -e "${C_CYAN}---${C_RESET}"
 }
 
-require_cmds() {
-    for cmd in "$@"; do
-        require_cmd "${cmd}"
-    done
+# 输出函数：高亮文本
+highlight() { echo -e "${C_BOLD}${C_YELLOW}$1${C_RESET}"; }
+
+# 日志与错误处理
+# 确保日志目录存在
+init_log_dir() { [[ -d "${LOG_DIR}" ]] || mkdir -p "${LOG_DIR}"; }
+
+# 日志记录函数（同时输出到控制台和日志文件）
+log_write() {
+    local level="$1"
+    local msg="$2"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[${timestamp}] [${level}] ${msg}" >> "${INSTALL_LOG}"
 }
 
-dir_exists_or_create() {
-    local dir=$1
-    if [[ ! -d "${dir}" ]]; then
-        detail "创建目录: ${dir}"
-        mkdir -p "${dir}" || fatal "无法创建目录: ${dir}"
+# 致命错误处理：停止并报告
+fatal() {
+    local msg="$1"
+    local code="${2:-1}"
+    err "${msg}"
+    log_write "FATAL" "${msg}"
+    echo -e "${C_RED}安装中断，请检查上述错误信息后重试。${C_RESET}"
+    exit "${code}"
+}
+
+# 命令执行包装器：失败时自动退出
+run_cmd() {
+    local desc="$1"
+    shift
+    info "执行: ${desc} ..."
+    log_write "EXEC" "${desc}: $*"
+    if "$@"; then
+        ok "${desc} 完成"
+        log_write "OK" "${desc}"
+        return 0
+    else
+        fatal "${desc} 失败 (命令: $*)"
     fi
 }
 
-backup_file() {
-    local file=$1
-    if [[ -f "${file}" ]]; then
-        local backup="${file}.backup.$(date +%Y%m%d_%H%M%S)"
-        cp "${file}" "${backup}" || warn "无法备份 ${file}"
-        detail "已备份: ${backup}"
+# 检查命令是否存在
+check_cmd() {
+    local cmd="$1"
+    local pkg="${2:-${cmd}}"
+    if ! command -v "${cmd}" &>/dev/null; then
+        warn "命令 ${cmd} 未找到，将尝试安装 ${pkg} ..."
+        return 1
     fi
-}
-
-wait_for_url() {
-    local url=$1
-    local max_wait=${2:-30}
-    local interval=${3:-2}
-    local waited=0
-
-    while ! curl -s --max-time 5 "${url}" &>/dev/null; do
-        sleep "${interval}"
-        waited=$((waited + interval))
-        if [[ ${waited} -ge ${max_wait} ]]; then
-            return 1
-        fi
-    done
     return 0
 }
 
-ask_yes_no() {
-    local prompt=$1
-    local default=${2:-"n"}
-    local answer
+# 检查目录或创建
+check_or_mkdir() { local dir="$1"; if [[ ! -d "${dir}" ]]; then info "创建目录: ${dir}"; mkdir -p "${dir}" || fatal "无法创建目录: ${dir}"; fi; }
 
-    while true; do
-        if [[ "${default}" == "y" ]]; then
-            read -rp "${prompt} [Y/n] " answer
-            answer=${answer:-Y}
-        else
-            read -rp "${prompt} [y/N] " answer
-            answer=${answer:-N}
-        fi
+# 检查文件是否存在
+file_exists() { [[ -f "$1" ]]; }
 
-        case "${answer}" in
-            [Yy]*) return 0 ;;
-            [Nn]*) return 1 ;;
-            *) warn "请输入 y 或 n" ;;
-        esac
-    done
-}
-
-###############################################################################
-# 环境检测函数
-###############################################################################
-
-detect_wsl2() {
-    if [[ -d "/mnt/wslg" ]] || [[ -f "/proc/sys/fs/binfmt_misc/WSLInterop" ]] || \
-       grep -qi microsoft /proc/version 2>/dev/null; then
-        echo "WSL2"
-        return 0
-    fi
-    if grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then
-        echo "WSL2"
-        return 0
-    fi
-    echo "native"
-    return 1
-}
-
-detect_docker() {
-    if ! cmd_exists docker; then
-        fatal "Docker 未安装\n修复: https://docs.docker.com/engine/install/ubuntu/"
-    fi
-    if ! docker info &>/dev/null; then
-        fatal "Docker 守护进程未运行\n修复: sudo systemctl start docker && sudo systemctl enable docker"
-    fi
-    success "Docker 运行正常"
-}
-
-detect_nvidia_docker() {
-    if ! docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q "nvidia"; then
-        warn "NVIDIA Docker Runtime 未配置"
-        warn "修复: "
-        warn "  1. 安装 nvidia-docker2:"
-        warn "     distribution=\$(. /etc/os-release;echo \$ID\$VERSION_ID)"
-        warn "     curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -"
-        warn "     curl -s -L https://nvidia.github.io/nvidia-docker/\$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list"
-        warn "     sudo apt update && sudo apt install -y nvidia-docker2"
-        warn "  2. 重启 Docker: sudo systemctl restart docker"
-        return 1
-    fi
-    success "NVIDIA Docker Runtime 已配置"
-}
-
-detect_nvidia_driver() {
-    if ! cmd_exists nvidia-smi; then
-        fatal "nvidia-smi 未找到，NVIDIA 驱动可能未安装\n修复: 在 Windows 主机上安装/更新 NVIDIA GPU 驱动"
-    fi
-    if ! nvidia-smi &>/dev/null; then
-        fatal "nvidia-smi 无法连接至 NVIDIA 驱动\n修复: 在 Windows 主机上 wsl --shutdown 后重新启动 WSL2"
-    fi
-    local gpu_name
-    gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    success "检测到 GPU: ${C_BOLD}${gpu_name}${C_RESET}"
-}
-
-detect_gpu_memory() {
-    local mem_total
-    mem_total=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -n1 | tr -d ' ')
-    echo "${mem_total}"
-}
-
-detect_cpu_cores() {
-    nproc
-}
-
-detect_network() {
-    # 检测是否为国内网络
-    local ip_country
-    ip_country=$(curl -s --max-time 5 "https://ipinfo.io/country" 2>/dev/null || echo "")
-    if [[ "${ip_country}" == "CN" ]] || [[ -z "${ip_country}" ]]; then
-        echo "cn"
+# 获取数据盘路径（如果不存在则使用脚本目录）
+get_data_path() {
+    local subpath="$1"
+    if [[ "${USE_DATA_DISK}" -eq 1 ]] && [[ -d "${DATA_DISK}" ]]; then
+        echo "${DATA_DISK}/triad/${subpath}"
     else
-        echo "global"
+        echo "${TRIAD_ROOT}/${subpath}"
     fi
 }
 
-###############################################################################
-# ext4 安全检查
-###############################################################################
+# 系统检查函数
+# 检查是否在 WSL2 环境中
+check_wsl2() {
+    info "检查 WSL2 环境 ..."
+    if [[ ! -f /proc/sys/fs/binfmt_misc/WSLInterop ]] && [[ ! -f /run/WSLInterop ]]; then
+        warn "未检测到 WSLInterop，可能不是 WSL2 环境"
+    else
+        ok "检测到 WSL2 环境"
+    fi
+    # 检查内核版本（WSL2 通常为 5.x）
+    local kernel
+    kernel=$(uname -r)
+    info "当前内核版本: ${kernel}"
+    if [[ "${kernel}" == *microsoft* ]] || [[ "${kernel}" == *Microsoft* ]]; then
+        ok "确认运行在 WSL2 内核上"
+    else
+        warn "内核名称不包含 'microsoft'，请确认是 WSL2"
+    fi
+}
 
-check_filesystem() {
-    step "检查文件系统"
+# 检查 Ubuntu 版本
+check_ubuntu_version() {
+    info "检查操作系统版本 ..."
+    if [[ ! -f /etc/os-release ]]; then
+        fatal "无法读取 /etc/os-release"
+    fi
+    source /etc/os-release
+    info "检测到操作系统: ${NAME} ${VERSION_ID}"
+    if [[ "${ID}" != "ubuntu" ]]; then
+        warn "当前不是 Ubuntu 系统，脚本针对 Ubuntu 22.04 优化"
+    fi
+    if [[ "${VERSION_ID}" != "22.04" ]]; then
+        warn "当前 Ubuntu 版本为 ${VERSION_ID}，建议升级到 22.04 以获得最佳兼容性"
+    else
+        ok "Ubuntu 22.04 确认"
+    fi
+}
 
-    dir_exists_or_create "${TRIAD_ROOT}"
+# 检查硬件配置（CPU、内存、GPU）
+check_hardware() {
+    info "检查硬件配置 ..."
+    # CPU 信息
+    local cpu_count
+    cpu_count=$(nproc)
+    info "逻辑 CPU 核心数: ${cpu_count}"
+    if [[ "${cpu_count}" -lt 8 ]]; then
+        warn "CPU 核心数较少 (${cpu_count})，编译过程可能较慢"
+    fi
 
-    local fs_type
-    fs_type=$(df -T "${TRIAD_ROOT}" | awk 'NR==2 {print $2}')
-    detail "文件系统类型: ${fs_type}"
+    # 内存信息
+    local mem_gb
+    mem_gb=$(free -g | awk '/^Mem:/{print $2}')
+    info "系统内存: ${mem_gb}GB"
+    if [[ "${mem_gb}" -lt 32 ]]; then
+        warn "内存不足 32GB，当前 ${mem_gb}GB，可能影响大模型加载"
+    fi
 
-    if [[ "${fs_type}" != "ext4" ]]; then
-        warn "推荐在 ext4 文件系统上运行以获得最佳性能"
-        warn "当前文件系统: ${fs_type}"
-        if ! ask_yes_no "是否继续?"; then
-            fatal "用户中止"
+    # GPU 信息
+    info "检查 NVIDIA GPU ..."
+    if ! command -v nvidia-smi &>/dev/null; then
+        fatal "未找到 nvidia-smi，请先安装 NVIDIA 驱动"
+    fi
+    local gpu_info
+    gpu_info=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || true)
+    if [[ -z "${gpu_info}" ]]; then
+        fatal "无法获取 GPU 信息，请检查 NVIDIA 驱动是否正确安装"
+    fi
+    info "检测到 GPU: ${gpu_info}"
+    # 检查是否为 2080Ti 22GB
+    if [[ "${gpu_info}" == *"2080 Ti"* ]] || [[ "${gpu_info}" == *"2080Ti"* ]]; then
+        ok "检测到 RTX 2080Ti（魔改 22GB）"
+    else
+        warn "未检测到 2080Ti，当前 GPU: ${gpu_info}"
+    fi
+    # 显存检查
+    local vmem
+    vmem=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -d ' ')
+    info "显存大小: ${vmem} MiB"
+    if [[ "${vmem}" -lt 22000 ]]; then
+        warn "显存不足 22GB (${vmem} MiB)，可能无法加载大模型"
+    else
+        ok "显存充足 (${vmem} MiB)"
+    fi
+}
+
+# 检查 NVMe 数据盘
+check_nvme_disk() {
+    info "检查 NVMe 数据盘挂载点 ..."
+    if [[ -d "${DATA_DISK}" ]]; then
+        ok "数据盘挂载点存在: ${DATA_DISK}"
+        local avail
+        avail=$(df -BG "${DATA_DISK}" | tail -1 | awk '{print $4}' | tr -d 'G')
+        info "数据盘可用空间: ${avail}GB"
+        if [[ "${avail}" -lt 100 ]]; then
+            warn "数据盘可用空间不足 100GB，请注意存储管理"
         fi
+        # 创建 triad 数据目录
+        check_or_mkdir "${DATA_DISK}/triad"
+    else
+        warn "数据盘挂载点 ${DATA_DISK} 不存在，将使用脚本目录作为数据存储"
+        warn "建议挂载第二块 NVMe SSD 到 ${DATA_DISK} 以获得最佳性能"
+        check_or_mkdir "${TRIAD_ROOT}/data"
     fi
-
-    case "${TRIAD_ROOT}" in
-        /mnt/*)
-            fatal "禁止将 Triad 根目录放在 /mnt/ 下（NTFS 跨界挂载）\n修复: TRIAD_ROOT 必须指向 WSL2 原生 ext4 分区，例如 ~/"
-            ;;
-    esac
-
-    success "文件系统检查通过"
 }
 
-###############################################################################
 # 国内镜像源配置
-###############################################################################
+# 配置 APT 国内源（阿里云 / 清华源）
+config_apt_mirror() {
+    step "2.1" "配置 APT 国内镜像源"
+    local sources_file="/etc/apt/sources.list"
+    local backup_file="/etc/apt/sources.list.bak.$(date +%Y%m%d%H%M%S)"
 
-configure_mirrors() {
-    step "配置国内镜像源"
-
-    local net_type
-    net_type=$(detect_network)
-
-    if [[ "${net_type}" == "global" ]]; then
-        info "检测到非国内网络，跳过镜像源配置"
-        return 0
+    # 备份原有源
+    if [[ ! -f "${backup_file}" ]]; then
+        info "备份原 apt 源列表到 ${backup_file}"
+        sudo cp "${sources_file}" "${backup_file}" || warn "无法备份 apt 源"
     fi
 
-    info "检测到国内网络，配置镜像源..."
+    # 检测 Ubuntu 版本并写入对应源
+    local version_id
+    version_id=$(source /etc/os-release && echo "${VERSION_ID}")
+    info "正在为 Ubuntu ${version_id} 配置阿里云镜像源 ..."
 
-    # --- Ubuntu apt 清华源 ---
-    if [[ -f /etc/apt/sources.list ]]; then
-        detail "配置 Ubuntu apt 清华源..."
-        backup_file /etc/apt/sources.list
-        sudo sed -i "s/archive.ubuntu.com/${UBUNTU_MIRROR}/g" /etc/apt/sources.list || warn "sed archive.ubuntu.com 失败"
-        sudo sed -i "s/security.ubuntu.com/${UBUNTU_MIRROR}/g" /etc/apt/sources.list || warn "sed security.ubuntu.com 失败"
-        success "apt 源已更新"
+    # 使用阿里云源
+    local mirror_content
+    mirror_content="# 阿里云 Ubuntu 镜像源
+# 由 triad_manager.sh 自动生成
+deb https://mirrors.aliyun.com/ubuntu/ jammy main restricted universe multiverse
+deb https://mirrors.aliyun.com/ubuntu/ jammy-updates main restricted universe multiverse
+deb https://mirrors.aliyun.com/ubuntu/ jammy-backports main restricted universe multiverse
+deb https://mirrors.aliyun.com/ubuntu/ jammy-security main restricted universe multiverse
+"
+    # 如果 VERSION_ID 不是 22.04，使用更通用的方式
+    if [[ "${version_id}" == "22.04" ]]; then
+        echo "${mirror_content}" | sudo tee "${sources_file}" >/dev/null
+    else
+        # 使用 sed 替换域名
+        sudo sed -i 's|archive.ubuntu.com|mirrors.aliyun.com|g' "${sources_file}" || true
+        sudo sed -i 's|security.ubuntu.com|mirrors.aliyun.com|g' "${sources_file}" || true
     fi
 
-    # --- Docker 阿里云镜像加速 ---
-    detail "配置 Docker 阿里云镜像加速..."
-    local docker_daemon="/etc/docker/daemon.json"
-    sudo mkdir -p /etc/docker
+    run_cmd "更新 apt 索引" sudo apt-get update
+    ok "APT 国内镜像源配置完成"
+}
 
-    # 注意：用户需要替换 <your_id> 为实际的阿里云加速器 ID
-    local aliyun_mirror="https://docker.mirrors.ustc.edu.cn"
-    # 备选：阿里云加速器需要用户自己注册获取 ID
-    # aliyun_mirror="https://<your_id>.mirror.aliyuncs.com"
+# 配置 pip 国内镜像源
+config_pip_mirror() {
+    step "2.2" "配置 pip 国内镜像源"
+    local pip_conf_dir="${HOME}/.config/pip"
+    local pip_conf="${pip_conf_dir}/pip.conf"
+    check_or_mkdir "${pip_conf_dir}"
 
-    if [[ -f "${docker_daemon}" ]]; then
-        backup_file "${docker_daemon}"
+    info "写入 pip 配置文件: ${pip_conf}"
+    cat > "${pip_conf}" <<EOF
+[global]
+index-url = ${PIP_INDEX_URL}
+trusted-host = ${PIP_TRUSTED_HOST}
+timeout = 120
+retries = 5
+
+[install]
+use-pep517 = true
+EOF
+    ok "pip 国内镜像源配置完成 (${PIP_INDEX_URL})"
+}
+
+# 配置 npm 国内镜像源
+config_npm_mirror() {
+    step "2.3" "配置 npm 国内镜像源"
+    if ! command -v npm &>/dev/null; then
+        warn "npm 尚未安装，将在 Node.js 安装后配置"
+        return
     fi
+    info "设置 npm 淘宝镜像源 ..."
+    npm config set registry "${NPM_REGISTRY}" || warn "npm  registry 设置失败"
+    # 安装 cnpm 作为备用
+    if ! command -v cnpm &>/dev/null; then
+        info "安装 cnpm ..."
+        npm install -g cnpm --registry="${NPM_REGISTRY}" || warn "cnpm 安装失败"
+    fi
+    ok "npm 国内镜像源配置完成 (${NPM_REGISTRY})"
+}
 
-    sudo tee "${docker_daemon}" <<EOF
+# 配置 Docker 国内镜像源
+config_docker_mirror() {
+    step "2.4" "配置 Docker 国内镜像源"
+    local daemon_dir="/etc/docker"
+    local daemon_file="${daemon_dir}/daemon.json"
+    check_or_mkdir "${daemon_dir}"
+
+    info "写入 Docker 守护进程配置 ..."
+    sudo tee "${daemon_file}" >/dev/null <<'EOF'
 {
   "registry-mirrors": [
-    "${aliyun_mirror}",
-    "https://docker.mirrors.ustc.edu.cn",
+    "https://registry.docker-cn.com",
     "https://hub-mirror.c.163.com",
-    "https://mirror.baidubce.com"
+    "https://mirror.baidubce.com",
+    "https://docker.mirrors.ustc.edu.cn",
+    "https://cr.console.aliyun.com"
   ],
-  "runtimes": {
-    "nvidia": {
-      "path": "nvidia-container-runtime",
-      "runtimeArgs": []
-    }
-  }
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "100m",
+    "max-file": "3"
+  },
+  "storage-driver": "overlay2"
 }
 EOF
-
-    # 尝试重启 Docker，但 WSL2 中 systemctl 可能不可用
-    if cmd_exists systemctl && systemctl is-active --quiet docker 2>/dev/null; then
-        detail "重启 Docker 服务..."
-        sudo systemctl restart docker || warn "systemctl restart docker 失败"
-    elif cmd_exists service && service docker status &>/dev/null; then
-        detail "重启 Docker 服务 (service)..."
-        sudo service docker restart || warn "service docker restart 失败"
-    else
-        warn "无法自动重启 Docker，请手动执行: sudo systemctl restart docker"
-    fi
-    success "Docker 镜像加速已配置"
-
-    # --- npm 淘宝源 ---
-    if cmd_exists npm; then
-        detail "配置 npm 淘宝镜像源..."
-        npm config set registry "${NPM_REGISTRY}" || warn "npm 源配置失败"
-        success "npm 源已更新"
-    else
-        warn "npm 未安装，跳过 npm 镜像配置"
-    fi
-
-    success "国内镜像源配置完成"
+    ok "Docker 国内镜像源配置完成"
 }
 
-###############################################################################
-# Docker 镜像拉取
-###############################################################################
+# Docker 与 nvidia-container-toolkit 安装
+install_docker() {
+    step "3" "安装原生 Docker CE 与 nvidia-container-toolkit"
+    if command -v docker &>/dev/null; then
+        local docker_version
+        docker_version=$(docker --version)
+        ok "Docker 已安装: ${docker_version}"
+    else
+        info "开始安装 Docker CE ..."
+        # 卸载旧版本（如果存在）
+        sudo apt-get remove -y docker docker-engine docker.io containerd runc || true
 
-pull_docker_images() {
-    step "拉取 Docker 镜像"
+        # 安装依赖包
+        run_cmd "安装 Docker 依赖" sudo apt-get install -y ca-certificates curl gnupg lsb-release
 
-    detect_docker
-    detect_nvidia_docker
+        # 添加 Docker 官方 GPG 密钥（通过国内镜像）
+        info "添加 Docker GPG 密钥 ..."
+        sudo install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg || \
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
-    local compose_file="${SCRIPT_DIR}/docker-compose.hpc.yml"
-    if [[ ! -f "${compose_file}" ]]; then
-        warn "未找到 ${compose_file}，尝试在当前目录查找..."
-        compose_file="docker-compose.hpc.yml"
-        if [[ ! -f "${compose_file}" ]]; then
-            # 尝试在 triad/ 子目录
-            compose_file="${SCRIPT_DIR}/triad/docker-compose.hpc.yml"
-            if [[ ! -f "${compose_file}" ]]; then
-                warn "未找到 docker-compose.hpc.yml，跳过 Docker 镜像拉取"
-                warn "请将 docker-compose.hpc.yml 放置在正确位置后重试"
-                return 1
-            fi
+        # 添加 Docker APT 仓库
+        info "添加 Docker APT 仓库 ..."
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/ubuntu $(lsb_release -cs) stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+        run_cmd "更新 apt 索引（Docker 仓库）" sudo apt-get update
+        run_cmd "安装 Docker CE 组件" sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+        # 将当前用户加入 docker 组
+        info "将当前用户加入 docker 组 ..."
+        sudo usermod -aG docker "${USER}" || warn "无法将用户加入 docker 组"
+
+        # 启动 Docker 服务
+        run_cmd "启动 Docker 服务" sudo systemctl start docker
+        run_cmd "设置 Docker 开机自启" sudo systemctl enable docker
+
+        ok "Docker CE 安装完成"
+    fi
+
+    # 验证 Docker 运行状态
+    if ! sudo systemctl is-active --quiet docker; then
+        fatal "Docker 服务未能正常启动"
+    fi
+
+    # 安装 nvidia-container-toolkit（让 Docker 容器使用 GPU）
+    install_nvidia_container_toolkit
+}
+
+# 安装 nvidia-container-toolkit
+install_nvidia_container_toolkit() {
+    info "检查 nvidia-container-toolkit ..."
+    if command -v nvidia-ctk &>/dev/null; then
+        ok "nvidia-container-toolkit 已安装"
+    else
+        info "开始安装 nvidia-container-toolkit ..."
+        # 添加 NVIDIA Container Toolkit 仓库
+        info "添加 NVIDIA Container Toolkit 仓库 ..."
+        curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | \
+            sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+        curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+            sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+            sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+        run_cmd "更新 apt 索引（NVIDIA 仓库）" sudo apt-get update
+        run_cmd "安装 nvidia-container-toolkit" sudo apt-get install -y nvidia-container-toolkit
+
+        # 配置 Docker 使用 nvidia 运行时
+        info "配置 Docker 使用 nvidia 运行时 ..."
+        sudo nvidia-ctk runtime configure --runtime=docker || warn "nvidia-ctk runtime 配置失败"
+        run_cmd "重启 Docker 服务" sudo systemctl restart docker
+
+        ok "nvidia-container-toolkit 安装完成"
+    fi
+
+    # 验证 GPU 容器可用性
+    info "验证 Docker GPU 支持 ..."
+    if sudo docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi &>/dev/null; then
+        ok "Docker GPU 支持验证通过"
+    else
+        warn "Docker GPU 验证未通过，请检查 nvidia-driver 和 nvidia-container-toolkit"
+    fi
+}
+
+# Python 3.10 与依赖安装
+install_python_env() {
+    step "4" "安装 Python 3.10 环境与依赖"
+    # 安装 Python 3.10
+    if ! command -v python3.10 &>/dev/null; then
+        info "安装 Python 3.10 ..."
+        run_cmd "安装 Python 3.10 包" sudo apt-get install -y python3.10 python3.10-venv python3.10-dev python3-pip
+    else
+        ok "Python 3.10 已安装"
+    fi
+
+    # 确保 pip 最新
+    info "升级 pip ..."
+    python3.10 -m pip install --upgrade pip --index-url "${PIP_INDEX_URL}" || \
+        python3.10 -m pip install --upgrade pip
+
+    # 安装全局 Python 依赖（系统级常用包）
+    info "安装全局 Python 依赖 ..."
+    local global_pkgs=("requests" "tqdm" "numpy" "psutil" "pyyaml")
+    python3.10 -m pip install "${global_pkgs[@]}" --index-url "${PIP_INDEX_URL}" || warn "部分全局包安装失败"
+
+    # 创建项目虚拟环境
+    local venv_dir="${TRIAD_ROOT}/venv"
+    if [[ ! -d "${venv_dir}" ]]; then
+        info "创建项目虚拟环境: ${venv_dir}"
+        python3.10 -m venv "${venv_dir}"
+    fi
+
+    # 安装项目依赖
+    local req_file="${TRIAD_ROOT}/requirements.txt"
+    if [[ -f "${req_file}" ]]; then
+        info "安装 requirements.txt 依赖 ..."
+        "${venv_dir}/bin/pip" install -r "${req_file}" --index-url "${PIP_INDEX_URL}" || warn "部分 requirements 安装失败"
+    else
+        warn "未找到 requirements.txt，跳过项目依赖安装"
+    fi
+
+    ok "Python 3.10 环境配置完成"
+}
+
+# Node.js 18 与 npm 依赖安装
+install_node_env() {
+    step "5" "安装 Node.js 18 与 npm 依赖"
+    if ! command -v node &>/dev/null || [[ "$(node -v | cut -d'v' -f2 | cut -d'.' -f1)" != "18" ]]; then
+        info "安装 Node.js 18 LTS ..."
+        # 卸载旧版本
+        sudo apt-get remove -y nodejs npm || true
+        sudo rm -f /etc/apt/sources.list.d/nodesource.list || true
+
+        # 使用 Nodesource 脚本安装 Node.js 18（通过国内加速）
+        local setup_script
+        setup_script=$(curl -fsSL https://deb.nodesource.com/setup_18.x || \
+                       curl -fsSL https://mirrors.aliyun.com/nodesource/setup_18.x || true)
+        if [[ -n "${setup_script}" ]]; then
+            echo "${setup_script}" | sudo -E bash -
+        else
+            # 手动添加仓库
+            sudo apt-get install -y ca-certificates curl gnupg
+            sudo mkdir -p /etc/apt/keyrings
+            curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+            local node_major=18
+            echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${node_major}.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list
+            run_cmd "更新 apt 索引（NodeSource）" sudo apt-get update
+        fi
+
+        run_cmd "安装 Node.js 18" sudo apt-get install -y nodejs
+    else
+        ok "Node.js 18 已安装: $(node -v)"
+    fi
+
+    # 验证 npm
+    if ! command -v npm &>/dev/null; then
+        fatal "npm 未正确安装"
+    fi
+    ok "npm 版本: $(npm -v)"
+
+    # 配置国内镜像
+    config_npm_mirror
+
+    # 安装项目 npm 依赖
+    local pkg_file="${TRIAD_ROOT}/package.json"
+    if [[ -f "${pkg_file}" ]]; then
+        info "安装项目 npm 依赖 ..."
+        pushd "${TRIAD_ROOT}" >/dev/null || fatal "无法进入项目目录"
+        npm install --registry="${NPM_REGISTRY}" || warn "npm install 部分失败"
+        popd >/dev/null || true
+    else
+        warn "未找到 package.json，跳过 npm 依赖安装"
+    fi
+
+    ok "Node.js 18 环境配置完成"
+}
+
+# llama.cpp 源码编译与 systemd 服务安装
+install_llama_cpp() {
+    step "6" "编译安装 llama.cpp（宿主机原生编译，CUDA 支持）"
+    local llama_dir="${TRIAD_ROOT}/llama.cpp"
+    local llama_bin_dir="${llama_dir}/build/bin"
+    local model_dir
+    model_dir=$(get_data_path "models")
+    check_or_mkdir "${model_dir}"
+
+    # 克隆或更新 llama.cpp 源码
+    if [[ ! -d "${llama_dir}/.git" ]]; then
+        info "克隆 llama.cpp 源码到 ${llama_dir} ..."
+        rm -rf "${llama_dir}" || true
+        run_cmd "克隆 llama.cpp 仓库" git clone --depth 1 "${LLAMA_CPP_REPO}" "${llama_dir}"
+    else
+        info "更新 llama.cpp 源码 ..."
+        pushd "${llama_dir}" >/dev/null || fatal "无法进入 llama.cpp 目录"
+        git pull --ff-only || warn "llama.cpp git pull 失败，继续使用当前版本"
+        popd >/dev/null || true
+    fi
+
+    # 检查 CUDA 环境
+    info "检查 CUDA 编译环境 ..."
+    if ! command -v nvcc &>/dev/null; then
+        warn "未找到 nvcc，尝试安装 cuda-toolkit ..."
+        sudo apt-get install -y nvidia-cuda-toolkit || warn "cuda-toolkit 安装失败，将尝试仅使用 CMAKE_CUDA_ARCHITECTURES"
+    fi
+    if [[ -d /usr/local/cuda ]]; then
+        export PATH="/usr/local/cuda/bin:${PATH}"
+        export LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+        ok "CUDA 路径已配置"
+    fi
+
+    # 清理旧构建并重新编译
+    pushd "${llama_dir}" >/dev/null || fatal "无法进入 llama.cpp 目录"
+    info "清理旧构建目录 ..."
+    rm -rf build
+    check_or_mkdir build
+
+    info "运行 CMake 配置（启用 CUDA） ..."
+    # 针对 2080Ti (Turing, SM75) 优化
+    cmake -B build \
+        -DLLAMA_CUDA=ON \
+        -DLLAMA_CUDA_F16=ON \
+        -DCMAKE_CUDA_ARCHITECTURES="75" \
+        -DLLAMA_NATIVE=ON \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLAMA_BUILD_SERVER=ON \
+        -DLLAMA_BUILD_EXAMPLES=OFF \
+        -DLLAMA_BUILD_TESTS=OFF \
+        . || fatal "CMake 配置失败"
+
+    info "开始编译 llama.cpp（使用 $(nproc) 线程） ..."
+    make -C build -j"$(nproc)" || fatal "llama.cpp 编译失败"
+
+    popd >/dev/null || true
+
+    # 验证编译产物
+    local llama_server="${llama_bin_dir}/llama-server"
+    if [[ ! -f "${llama_server}" ]]; then
+        # 有些版本的 llama.cpp 二进制文件在 build/bin 或 build 根目录
+        if [[ -f "${llama_dir}/build/llama-server" ]]; then
+            llama_server="${llama_dir}/build/llama-server"
+        else
+            fatal "未找到 llama-server 编译产物"
         fi
     fi
+    ok "llama-server 编译成功: ${llama_server}"
+    "${llama_server}" --version 2>/dev/null || true
 
-    detail "使用 compose 文件: ${compose_file}"
-    docker compose -f "${compose_file}" pull || fatal "Docker 镜像拉取失败\n修复: 检查网络连接和 Docker 镜像源配置"
-    success "Docker 镜像拉取完成"
+    # 创建符号链接到 /usr/local/bin
+    info "安装 llama-server 到 /usr/local/bin ..."
+    sudo ln -sf "${llama_server}" /usr/local/bin/llama-server || warn "无法创建 llama-server 符号链接"
+    # 同时链接其他常用工具
+    for tool in llama-cli llama-quantize; do
+        local tool_path="${llama_bin_dir}/${tool}"
+        [[ -f "${tool_path}" ]] && sudo ln -sf "${tool_path}" "/usr/local/bin/${tool}" || true
+    done
+
+    # 安装 systemd 服务
+    install_llama_systemd_service "${llama_server}" "${model_dir}"
+
+    ok "llama.cpp 编译安装完成"
 }
 
-###############################################################################
-# Web UI 生产构建
-###############################################################################
+# 安装 llama-server systemd 服务
+install_llama_systemd_service() {
+    local server_bin="$1"
+    local model_dir="$2"
+    local service_file="/etc/systemd/system/llama-server.service"
+    local model_path="${model_dir}/${MODEL_GGUF_FILENAME}"
 
-build_webui() {
-    step "构建 Web UI"
+    info "创建 llama-server systemd 服务 ..."
+    # 等待模型下载完成后再实际启动服务
+    sudo tee "${service_file}" >/dev/null <<EOF
+[Unit]
+Description=llama.cpp Server (Triad)
+After=network.target
 
-    require_cmd npm "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs"
+[Service]
+Type=simple
+User=${USER}
+WorkingDirectory=${TRIAD_ROOT}
+Environment="CUDA_VISIBLE_DEVICES=0"
+Environment="PATH=/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="LD_LIBRARY_PATH=/usr/local/cuda/lib64"
+ExecStartPre=/bin/sh -c 'until [ -f ${model_path} ]; do echo "等待模型文件..."; sleep 5; done'
+ExecStart=${server_bin} \
+    --model ${model_path} \
+    --host ${BIND_ADDRESS} \
+    --port ${LLAMA_PORT} \
+    --ctx-size 8192 \
+    --n-gpu-layers 99 \
+    --batch-size 512 \
+    --parallel 1 \
+    --timeout 300 \
+    --chat-template chatml
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:${LOG_DIR}/llama-server.log
+StandardError=append:${LOG_DIR}/llama-server.log
 
-    local webui_dir="${SCRIPT_DIR}/triad/webui"
-    if [[ ! -d "${webui_dir}" ]]; then
-        webui_dir="${SCRIPT_DIR}/webui"
-        if [[ ! -d "${webui_dir}" ]]; then
-            warn "未找到 webui 目录，跳过 Web UI 构建"
-            warn "预期路径: ${SCRIPT_DIR}/triad/webui 或 ${SCRIPT_DIR}/webui"
-            return 1
-        fi
-    fi
+[Install]
+WantedBy=multi-user.target
+EOF
 
-    detail "进入目录: ${webui_dir}"
-    cd "${webui_dir}" || fatal "无法进入 ${webui_dir}"
-
-    detail "安装 npm 依赖..."
-    npm install || fatal "npm install 失败\n修复: npm cache clean --force && npm install"
-
-    detail "生产构建..."
-    npm run build || fatal "npm run build 失败"
-
-    # 复制 dist/ 到 OpenClaw 静态文件目录
-    local openclaw_static="${SCRIPT_DIR}/triad/openclaw/static"
-    if [[ ! -d "${openclaw_static}" ]]; then
-        openclaw_static="${SCRIPT_DIR}/openclaw/static"
-    fi
-    if [[ -d "${openclaw_static}" ]]; then
-        detail "复制 dist 到 OpenClaw 静态目录..."
-        rm -rf "${openclaw_static}/dist"
-        cp -r dist "${openclaw_static}/" || warn "复制 dist 到 ${openclaw_static} 失败"
-    else
-        warn "未找到 OpenClaw 静态目录，dist 保留在 ${webui_dir}/dist"
-    fi
-
-    success "Web UI 构建完成"
+    run_cmd "重新加载 systemd 配置" sudo systemctl daemon-reload
+    run_cmd "启用 llama-server 开机自启" sudo systemctl enable llama-server
+    ok "llama-server systemd 服务已安装"
 }
 
-###############################################################################
-# GGUF 模型下载
-###############################################################################
-
+# Qwen-14B GGUF 模型下载
 download_model() {
-    step "下载 GGUF 模型"
+    step "7" "下载 Qwen-14B Q4_K_M GGUF 模型到数据盘"
+    local model_dir
+    model_dir=$(get_data_path "models")
+    check_or_mkdir "${model_dir}"
+    local model_path="${model_dir}/${MODEL_GGUF_FILENAME}"
 
-    dir_exists_or_create "${TRIAD_MODELS}"
-
-    if [[ -f "${LLAMA_MODEL_PATH}" ]]; then
+    if [[ -f "${model_path}" ]]; then
         local file_size
-        file_size=$(du -h "${LLAMA_MODEL_PATH}" | cut -f1)
-        success "模型已存在: ${LLAMA_MODEL_PATH} (大小: ${file_size})"
+        file_size=$(stat -c%s "${model_path}" 2>/dev/null || echo 0)
+        if [[ "${file_size}" -gt 1000000000 ]]; then
+            ok "模型文件已存在: ${model_path} ($((file_size / 1024 / 1024 / 1024))GB)"
+            return 0
+        else
+            warn "模型文件已存在但大小异常 (${file_size} bytes)，重新下载"
+            rm -f "${model_path}"
+        fi
+    fi
+
+    info "开始下载模型: ${MODEL_GGUF_FILENAME}"
+    info "下载地址: ${MODEL_GGUF_URL}"
+    info "保存路径: ${model_path}"
+
+    # 优先使用 wget，带重试和断点续传
+    local wget_opts="--show-progress --timeout=120 --tries=10"
+    if wget --help 2>/dev/null | grep -q 'continue'; then
+        wget_opts="${wget_opts} --continue"
+    fi
+
+    if wget ${wget_opts} -O "${model_path}" "${MODEL_GGUF_URL}"; then
+        ok "模型下载完成"
+    else
+        warn "wget 下载失败，尝试使用 curl ..."
+        if curl -L -C - -o "${model_path}" "${MODEL_GGUF_URL}"; then
+            ok "模型下载完成 (curl)"
+        else
+            fatal "模型下载失败，请检查网络连接或手动下载到 ${model_path}"
+        fi
+    fi
+
+    # 验证文件大小
+    local final_size
+    final_size=$(stat -c%s "${model_path}" 2>/dev/null || echo 0)
+    info "模型文件大小: $((final_size / 1024 / 1024 / 1024))GB"
+    if [[ "${final_size}" -lt 7000000000 ]]; then
+        warn "模型文件大小异常，可能下载不完整 (${final_size} bytes)"
+    fi
+}
+
+# ComfyUI venv 配置
+install_comfyui_env() {
+    step "8" "配置 ComfyUI Python 虚拟环境"
+    local comfy_dir
+    comfy_dir=$(get_data_path "comfyui")
+    check_or_mkdir "${comfy_dir}"
+    local comfy_venv="${comfy_dir}/venv"
+
+    # 如果 ComfyUI 目录不存在，克隆仓库
+    if [[ ! -d "${comfy_dir}/ComfyUI" ]]; then
+        info "克隆 ComfyUI 仓库 ..."
+        git clone --depth 1 https://ghproxy.com/https://github.com/comfyanonymous/ComfyUI.git "${comfy_dir}/ComfyUI" || \
+            git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git "${comfy_dir}/ComfyUI" || \
+            warn "ComfyUI 克隆失败"
+    else
+        info "ComfyUI 已存在，尝试更新 ..."
+        pushd "${comfy_dir}/ComfyUI" >/dev/null || true
+        git pull --ff-only || warn "ComfyUI 更新失败"
+        popd >/dev/null || true
+    fi
+
+    # 创建 ComfyUI 专用虚拟环境
+    if [[ ! -d "${comfy_venv}" ]]; then
+        info "创建 ComfyUI 虚拟环境 ..."
+        python3.10 -m venv "${comfy_venv}"
+    fi
+
+    # 安装 ComfyUI 依赖
+    local comfy_req="${comfy_dir}/ComfyUI/requirements.txt"
+    if [[ -f "${comfy_req}" ]]; then
+        info "安装 ComfyUI 依赖 ..."
+        "${comfy_venv}/bin/pip" install -r "${comfy_req}" --index-url "${PIP_INDEX_URL}" || warn "部分 ComfyUI 依赖安装失败"
+    fi
+
+    # 安装 torch  nightly/cu118 版本（2080Ti 支持 CUDA 11.8 / 12.1）
+    info "安装 PyTorch (CUDA 11.8) ..."
+    "${comfy_venv}/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 || \
+        warn "PyTorch CUDA 11.8 安装失败，尝试默认版本" && \
+        "${comfy_venv}/bin/pip" install torch torchvision torchaudio
+
+    # 安装 xformers 加速（可选）
+    info "尝试安装 xformers ..."
+    "${comfy_venv}/bin/pip" install xformers || warn "xformers 安装失败（非必需）"
+
+    # 创建 ComfyUI 启动脚本
+    local comfy_launch="${comfy_dir}/launch.sh"
+    cat > "${comfy_launch}" <<EOF
+#!/bin/bash
+# ComfyUI 启动脚本（由 triad_manager.sh 自动生成）
+export PATH="/usr/local/cuda/bin:\${PATH}"
+export LD_LIBRARY_PATH="/usr/local/cuda/lib64:\${LD_LIBRARY_PATH}"
+cd "${comfy_dir}/ComfyUI"
+source "${comfy_venv}/bin/activate"
+python main.py --listen ${BIND_ADDRESS} --port ${COMFYUI_PORT} \$@
+EOF
+    chmod +x "${comfy_launch}"
+
+    # 创建 systemd 服务
+    local service_file="/etc/systemd/system/comfyui.service"
+    sudo tee "${service_file}" >/dev/null <<EOF
+[Unit]
+Description=ComfyUI Server (Triad)
+After=network.target
+
+[Service]
+Type=simple
+User=${USER}
+WorkingDirectory=${comfy_dir}/ComfyUI
+Environment="PATH=${comfy_venv}/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="LD_LIBRARY_PATH=/usr/local/cuda/lib64"
+Environment="CUDA_VISIBLE_DEVICES=0"
+ExecStart=${comfy_venv}/bin/python main.py --listen ${BIND_ADDRESS} --port ${COMFYUI_PORT}
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:${LOG_DIR}/comfyui.log
+StandardError=append:${LOG_DIR}/comfyui.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    run_cmd "重新加载 systemd 配置（ComfyUI）" sudo systemctl daemon-reload
+    run_cmd "启用 ComfyUI 开机自启" sudo systemctl enable comfyui
+    ok "ComfyUI 环境配置完成"
+}
+
+# Qdrant 向量数据库配置（Docker 容器）
+install_qdrant() {
+    step "9" "部署 Qdrant 向量数据库（Docker）"
+    local qdrant_dir
+    qdrant_dir=$(get_data_path "qdrant")
+    check_or_mkdir "${qdrant_dir}"
+    check_or_mkdir "${qdrant_dir}/storage"
+
+    # 拉取 Qdrant 镜像
+    info "拉取 Qdrant Docker 镜像 ..."
+    sudo docker pull qdrant/qdrant:latest || warn "Qdrant 镜像拉取失败，将尝试使用已有镜像"
+
+    # 创建 Qdrant 配置
+    local qdrant_config="${qdrant_dir}/config.yaml"
+    cat > "${qdrant_config}" <<EOF
+# Qdrant 配置文件（由 triad_manager.sh 自动生成）
+log_level: INFO
+storage:
+  storage_path: /qdrant/storage
+data:
+  on_disk_payload: true
+service:
+  http_port: 6333
+  grpc_port: 6334
+  max_request_size_mb: 32
+  max_workers: 4
+EOF
+
+    ok "Qdrant Docker 配置完成，数据目录: ${qdrant_dir}"
+}
+
+# .env 环境文件生成
+generate_env_file() {
+    step "10" "生成 .env 环境配置文件"
+    info "写入端口配置到 ${ENV_FILE} ..."
+    cat > "${ENV_FILE}" <<EOF
+# Triad 环境配置文件（由 triad_manager.sh 自动生成）
+# 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
+
+# 服务绑定地址
+BIND_ADDRESS=${BIND_ADDRESS}
+
+# 服务端口（全部大端口号 +10000）
+OPENCLAW_PORT=${OPENCLAW_PORT}
+HERMES_PORT=${HERMES_PORT}
+LLAMA_PORT=${LLAMA_PORT}
+COMFYUI_PORT=${COMFYUI_PORT}
+QDRANT_HTTP_PORT=${QDRANT_HTTP_PORT}
+QDRANT_GRPC_PORT=${QDRANT_GRPC_PORT}
+EMBEDDING_API_PORT=${EMBEDDING_API_PORT}
+MCP_SERVER_PORT=${MCP_SERVER_PORT}
+
+# 模型配置
+MODEL_NAME=${MODEL_NAME}
+MODEL_PATH=$(get_data_path "models")/${MODEL_GGUF_FILENAME}
+LLAMA_CPP_ROOT=${TRIAD_ROOT}/llama.cpp
+
+# 数据盘路径
+DATA_DISK=${DATA_DISK}
+COMFYUI_ROOT=$(get_data_path "comfyui")/ComfyUI
+QDRANT_STORAGE=$(get_data_path "qdrant")/storage
+
+# GPU 配置
+CUDA_VISIBLE_DEVICES=0
+GPU_LAYERS=99
+CONTEXT_SIZE=8192
+
+# 日志路径
+LOG_DIR=${LOG_DIR}
+EOF
+
+    ok ".env 文件生成完成: ${ENV_FILE}"
+}
+
+# Web UI 构建
+build_web_ui() {
+    step "11" "构建 Web UI"
+    local web_dir="${TRIAD_ROOT}/web"
+    if [[ ! -d "${web_dir}" ]]; then
+        warn "未找到 web 目录 ${web_dir}，跳过 Web UI 构建"
         return 0
     fi
 
-    info "目标模型: ${LLAMA_MODEL_NAME}"
-    info "保存路径: ${LLAMA_MODEL_PATH}"
-
-    export HF_ENDPOINT="${HF_ENDPOINT_URL}"
-
-    # 尝试使用 huggingface-cli
-    if cmd_exists huggingface-cli || pip install huggingface-hub 2>/dev/null; then
-        detail "使用 huggingface-cli 下载..."
-        if huggingface-cli download \
-            "Qwen/Qwen-14B-Chat-GGUF" \
-            "${LLAMA_MODEL_NAME}" \
-            --local-dir "${TRIAD_MODELS}" \
-            --local-dir-use-symlinks False 2>/dev/null; then
-            success "模型下载完成 (huggingface-cli)"
-            return 0
-        else
-            warn "huggingface-cli 下载失败，尝试备选方案..."
-        fi
-    fi
-
-    # 备选方案 1: wget
-    if cmd_exists wget; then
-        detail "使用 wget 从 hf-mirror.com 下载..."
-        if wget --show-progress \
-            "${LLAMA_MODEL_URL}" \
-            -O "${LLAMA_MODEL_PATH}.tmp" 2>/dev/null; then
-            mv "${LLAMA_MODEL_PATH}.tmp" "${LLAMA_MODEL_PATH}"
-            success "模型下载完成 (wget)"
-            return 0
-        else
-            rm -f "${LLAMA_MODEL_PATH}.tmp"
-            warn "wget 下载失败"
-        fi
-    fi
-
-    # 备选方案 2: aria2c (支持断点续传)
-    if cmd_exists aria2c; then
-        detail "使用 aria2c 从 hf-mirror.com 下载（支持断点续传）..."
-        if aria2c -x 4 -s 4 \
-            "${LLAMA_MODEL_URL}" \
-            -d "${TRIAD_MODELS}" \
-            -o "${LLAMA_MODEL_NAME}" 2>/dev/null; then
-            success "模型下载完成 (aria2c)"
-            return 0
-        else
-            warn "aria2c 下载失败"
-        fi
-    fi
-
-    # 备选方案 3: curl
-    if cmd_exists curl; then
-        detail "使用 curl 从 hf-mirror.com 下载..."
-        if curl -L --progress-bar \
-            "${LLAMA_MODEL_URL}" \
-            -o "${LLAMA_MODEL_PATH}.tmp" 2>/dev/null; then
-            mv "${LLAMA_MODEL_PATH}.tmp" "${LLAMA_MODEL_PATH}"
-            success "模型下载完成 (curl)"
-            return 0
-        else
-            rm -f "${LLAMA_MODEL_PATH}.tmp"
-            warn "curl 下载失败"
-        fi
-    fi
-
-    # 全部失败
-    fatal "模型下载全部失败\n\n手动下载指引:\n  wget ${LLAMA_MODEL_URL} -O ${LLAMA_MODEL_PATH}\n\n或:\n  aria2c -x 4 -s 4 ${LLAMA_MODEL_URL} -d ${TRIAD_MODELS} -o ${LLAMA_MODEL_NAME}\n\n或:\n  curl -L ${LLAMA_MODEL_URL} -o ${LLAMA_MODEL_PATH}"
+    info "构建 Web UI ..."
+    pushd "${web_dir}" >/dev/null || fatal "无法进入 web 目录"
+    npm install --registry="${NPM_REGISTRY}" || warn "Web UI npm install 失败"
+    npm run build 2>/dev/null || warn "Web UI build 失败（可能需要手动构建）"
+    popd >/dev/null || true
+    ok "Web UI 构建完成"
 }
 
-###############################################################################
-# ComfyUI 安装
-###############################################################################
+# 安装后测试验证
+post_install_test() {
+    step "12" "安装后测试验证"
+    # 检查各组件是否存在
+    info "验证关键组件 ..."
+    local errors=0
 
-install_comfyui() {
-    step "安装 ComfyUI"
-
-    local comfyui_script="${SCRIPT_DIR}/scripts/install_comfyui.sh"
-    if [[ ! -f "${comfyui_script}" ]]; then
-        comfyui_script="${SCRIPT_DIR}/install_comfyui.sh"
-        if [[ ! -f "${comfyui_script}" ]]; then
-            warn "未找到 install_comfyui.sh，跳过 ComfyUI 安装"
-            warn "预期路径: ${SCRIPT_DIR}/scripts/install_comfyui.sh"
-            return 1
-        fi
+    if command -v docker &>/dev/null; then
+        ok "Docker: 已安装"
+    else
+        err "Docker: 未安装"; ((errors++))
     fi
 
-    detail "执行安装脚本: ${comfyui_script}"
-    bash "${comfyui_script}" || fatal "ComfyUI 安装失败\n修复: 检查 install_comfyui.sh 日志输出"
-    success "ComfyUI 安装完成"
+    if command -v python3.10 &>/dev/null; then
+        ok "Python 3.10: 已安装"
+    else
+        err "Python 3.10: 未安装"; ((errors++))
+    fi
+
+    if command -v node &>/dev/null; then
+        ok "Node.js: 已安装 ($(node -v))"
+    else
+        err "Node.js: 未安装"; ((errors++))
+    fi
+
+    if [[ -f "${TRIAD_ROOT}/llama.cpp/build/bin/llama-server" ]] || [[ -f "${TRIAD_ROOT}/llama.cpp/build/llama-server" ]]; then
+        ok "llama.cpp: 已编译"
+    else
+        err "llama.cpp: 未编译"; ((errors++))
+    fi
+
+    local model_path
+    model_path=$(get_data_path "models")/${MODEL_GGUF_FILENAME}
+    if [[ -f "${model_path}" ]]; then
+        ok "模型文件: 已下载"
+    else
+        warn "模型文件: 未找到 (${model_path})"
+    fi
+
+    if [[ -f "${ENV_FILE}" ]]; then
+        ok ".env 配置: 已生成"
+    else
+        err ".env 配置: 未生成"; ((errors++))
+    fi
+
+    # 写入安装完成标记
+    if [[ "${errors}" -eq 0 ]]; then
+        date '+%Y-%m-%d %H:%M:%S' > "${INSTALL_FLAG}"
+        ok "安装验证通过，标记写入 ${INSTALL_FLAG}"
+    else
+        warn "安装验证发现 ${errors} 个问题，请检查日志"
+    fi
 }
 
-###############################################################################
-# 生成 .env 文件
-###############################################################################
-
-generate_env() {
-    step "生成环境配置文件"
-
-    local gpu_mem
-    gpu_mem=$(detect_gpu_memory)
-    local cpu_cores
-    cpu_cores=$(detect_cpu_cores)
-    local uid gid
-    uid=$(id -u)
-    gid=$(id -g)
-
-    dir_exists_or_create "${TRIAD_ROOT}"
-
-    backup_file "${TRIAD_CONFIG}"
-
-    cat > "${TRIAD_CONFIG}" <<EOF
-# Triad 环境配置文件
-# 生成时间: $(date '+%Y-%m-%d %H:%M:%S')
-# 脚本版本: ${SCRIPT_VERSION}
-
-# 用户配置
-UID=${uid}
-GID=${gid}
-
-# 硬件配置
-GPU_MEMORY=${gpu_mem}
-CPU_CORES=${cpu_cores}
-
-# 路径配置
-TRIAD_ROOT=${TRIAD_ROOT}
-LLAMA_MODEL_PATH=${LLAMA_MODEL_PATH}
-
-# 服务配置
-COMFYUI_HOST=host.docker.internal
-COMFYUI_PORT=18188
-
-# 网络配置
-HF_ENDPOINT=${HF_ENDPOINT_URL}
-
-# Docker 配置
-DOCKER_COMPOSE_FILE=${SCRIPT_DIR}/docker-compose.hpc.yml
-
-# 日志配置
-LOG_DIR=${TRIAD_LOGS}
-EOF
-
-    success "环境配置已写入: ${TRIAD_CONFIG}"
-    detail "GPU 显存: ${gpu_mem} MiB"
-    detail "CPU 核心: ${cpu_cores}"
-    detail "用户 UID: ${uid}, GID: ${gid}"
-}
-
-###############################################################################
-# 安装完成提示
-###############################################################################
-
-print_install_complete() {
-    local gpu_mem
-    gpu_mem=$(detect_gpu_memory)
-
-    echo ""
-    echo -e "${C_GREEN}${C_BOLD}╔═══════════════════════════════════════════════════════════╗${C_RESET}"
-    echo -e "${C_GREEN}${C_BOLD}║                 Triad 环境安装完成                        ║${C_RESET}"
-    echo -e "${C_GREEN}${C_BOLD}╠═══════════════════════════════════════════════════════════╣${C_RESET}"
-    echo -e "${C_GREEN}║  模型路径: ${LLAMA_MODEL_PATH}${C_RESET}"
-    echo -e "${C_GREEN}║  配置文件: ${TRIAD_CONFIG}${C_RESET}"
-    echo -e "${C_GREEN}║  ComfyUI:  ${COMFYUI_DIR}${C_RESET}"
-    echo -e "${C_GREEN}║  日志目录: ${TRIAD_LOGS}${C_RESET}"
-    echo -e "${C_GREEN}${C_BOLD}╠═══════════════════════════════════════════════════════════╣${C_RESET}"
-    echo -e "${C_GREEN}║  服务地址:                                               ║${C_RESET}"
-    echo -e "${C_GREEN}║    Web UI:      http://localhost:8080/panel               ║${C_RESET}"
-    echo -e "${C_GREEN}║    Gateway:     ws://localhost:8080/ws/tasks            ║${C_RESET}"
-    echo -e "${C_GREEN}║    llama-srv:  http://localhost:18000/v1/chat/completions║${C_RESET}"
-    echo -e "${C_GREEN}║    ComfyUI:    http://localhost:18188                   ║${C_RESET}"
-    echo -e "${C_GREEN}${C_BOLD}╠═══════════════════════════════════════════════════════════╣${C_RESET}"
-    echo -e "${C_GREEN}║  硬件信息:                                               ║${C_RESET}"
-    echo -e "${C_GREEN}║    GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | sed 's/^[[:space:]]*//')${C_RESET}"
-    echo -e "${C_GREEN}║    VRAM: ${gpu_mem} MiB${C_RESET}"
-    echo -e "${C_GREEN}║    CPU: $(detect_cpu_cores) 核心${C_RESET}"
-    echo -e "${C_GREEN}${C_BOLD}╠═══════════════════════════════════════════════════════════╣${C_RESET}"
-    echo -e "${C_GREEN}║  下一步: ./${SCRIPT_NAME} start                           ║${C_RESET}"
-    echo -e "${C_GREEN}${C_BOLD}╚═══════════════════════════════════════════════════════════╝${C_RESET}"
-    echo ""
-}
-
-###############################################################################
-# INSTALL 命令
-###############################################################################
-
+# install 主流程
 cmd_install() {
-    echo -e "${C_BOLD}${C_PURPLE}"
-    echo "  ████████╗██████╗ ██╗ █████╗ ██████╗ "
-    echo "  ╚══██╔══╝██╔══██╗██║██╔══██╗██╔══██╗"
-    echo "     ██║   ██████╔╝██║███████║██║  ██║"
-    echo "     ██║   ██╔══██╗██║██╔══██║██║  ██║"
-    echo "     ██║   ██║  ██║██║██║  ██║██████╔╝"
-    echo "     ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚═════╝ "
-    echo -e "  三层 AI Agent 系统 - 一键安装${C_RESET}"
-    echo ""
+    highlight "开始 Triad 一键安装流程 (v${SCRIPT_VERSION})"
+    init_log_dir
 
-    info "脚本版本: ${SCRIPT_VERSION}"
-    info "Triad 根目录: ${TRIAD_ROOT}"
+    # 步骤 1: 系统检查
+    step "1" "系统环境检查"
+    check_wsl2
+    check_ubuntu_version
+    check_hardware
+    check_nvme_disk
+    ok "系统检查完成"
 
-    local wsl_type
-    wsl_type=$(detect_wsl2)
-    if [[ "${wsl_type}" == "WSL2" ]]; then
-        success "检测到 WSL2 环境"
-    else
-        warn "未检测到 WSL2，确认在原生 Linux 上运行"
-    fi
+    # 步骤 2: 配置国内镜像源
+    config_apt_mirror
+    config_pip_mirror
+    config_docker_mirror
 
-    # 预检查
-    require_cmds curl grep awk sed sudo tee mkdir cp rm mv chmod date du
-    detect_nvidia_driver
+    # 步骤 3: 安装 Docker + nvidia-toolkit
+    install_docker
 
-    # 执行安装步骤
-    check_filesystem
-    configure_mirrors
-    pull_docker_images
-    build_webui
+    # 步骤 4: Python 环境
+    install_python_env
+
+    # 步骤 5: Node.js 环境
+    install_node_env
+
+    # 步骤 6: llama.cpp 编译
+    install_llama_cpp
+
+    # 步骤 7: 模型下载
     download_model
-    install_comfyui
-    generate_env
 
-    print_install_complete
+    # 步骤 8: ComfyUI 环境
+    install_comfyui_env
+
+    # 步骤 9: Qdrant 配置
+    install_qdrant
+
+    # 步骤 10: .env 生成
+    generate_env_file
+
+    # 步骤 11: Web UI 构建
+    build_web_ui
+
+    # 步骤 12: 测试验证
+    post_install_test
+
+    line
+    ok "Triad 一键安装流程全部完成！"
+    info "日志文件: ${INSTALL_LOG}"
+    info "配置环境变量: source ${ENV_FILE}"
+    info "启动服务: ${SCRIPT_NAME} start"
+    line
 }
 
-###############################################################################
-# START 命令
-###############################################################################
-
-cmd_start() {
-    echo -e "${C_BOLD}${C_PURPLE}"
-    echo "  ████████╗██████╗ ██╗ █████╗ ██████╗ "
-    echo "  ╚══██╔══╝██╔══██╗██║██╔══██╗██╔══██╗"
-    echo "     ██║   ██████╔╝██║███████║██║  ██║"
-    echo "     ██║   ██╔══██╗██║██╔══██║██║  ██║"
-    echo "     ██║   ██║  ██║██║██║  ██║██████╔╝"
-    echo "     ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═╝╚═════╝ "
-    echo -e "  三层 AI Agent 系统 - 一键启动${C_RESET}"
-    echo ""
-
-    # 环境检查
-    detect_docker
-    detect_nvidia_driver
-
-    if [[ ! -f "${TRIAD_CONFIG}" ]]; then
-        fatal "未找到 ${TRIAD_CONFIG}\n修复: 先运行 ./${SCRIPT_NAME} install"
-    fi
-
-    # 加载 .env
-    set -a
-    # shellcheck source=/dev/null
-    source "${TRIAD_CONFIG}"
-    set +a
-
-    # 创建日志目录
-    dir_exists_or_create "${TRIAD_LOGS}"
-
-    # --- 1. 检查并启动 ComfyUI ---
-    step "检查 ComfyUI 状态"
-    local comfyui_ready=false
-    if curl -s --max-time 3 "http://localhost:18188/system_stats" &>/dev/null; then
-        success "ComfyUI 已在运行 (localhost:18188)"
-        comfyui_ready=true
-    else
-        warn "ComfyUI 未启动，尝试自动拉起..."
-
-        if [[ ! -d "${COMFYUI_DIR}" ]]; then
-            fatal "未找到 ComfyUI 目录: ${COMFYUI_DIR}\n修复: ./${SCRIPT_NAME} install"
-        fi
-
-        if [[ ! -d "${COMFYUI_VENV}" ]]; then
-            fatal "未找到 ComfyUI 虚拟环境: ${COMFYUI_VENV}\n修复: ./${SCRIPT_NAME} install"
-        fi
-
-        detail "激活虚拟环境: ${COMFYUI_VENV}"
+# 服务管理子命令
+# 获取 .env 中的变量（如果存在）
+load_env() {
+    if [[ -f "${ENV_FILE}" ]]; then
         # shellcheck source=/dev/null
-        source "${COMFYUI_VENV}/bin/activate" || fatal "无法激活 ComfyUI 虚拟环境"
+        set -a
+        source "${ENV_FILE}"
+        set +a
+    fi
+}
 
-        cd "${COMFYUI_DIR}" || fatal "无法进入 ${COMFYUI_DIR}"
+# 启动所有服务
+cmd_start() {
+    highlight "启动 Triad 全部服务"
+    load_env
+    init_log_dir
 
-        detail "启动 ComfyUI (nohup)..."
-        nohup python main.py \
-            --listen 0.0.0.0 \
-            --port 18188 \
-            > "${COMFYUI_LOG}" 2>&1 &
+    # 检查是否已安装
+    if [[ ! -f "${INSTALL_FLAG}" ]]; then
+        warn "未检测到安装标记 (${INSTALL_FLAG})"
+        warn "建议先运行: ${SCRIPT_NAME} install"
+        read -rp "是否继续启动? [y/N] " confirm
+        [[ "${confirm}" == [yY]* ]] || exit 1
+    fi
 
-        local comfyui_pid=$!
-        detail "ComfyUI PID: ${comfyui_pid}"
+    line
+    info "正在启动服务 ..."
+    line
 
-        # 等待启动
-        detail "等待 ComfyUI 就绪 (最多 60 秒)..."
-        local waited=0
-        while ! curl -s --max-time 2 "http://localhost:18188/system_stats" &>/dev/null; do
+    # 1. 启动 llama-server (systemd)
+    info "启动 llama-server (端口: ${LLAMA_PORT}) ..."
+    if sudo systemctl start llama-server 2>/dev/null; then
+        ok "llama-server 已启动"
+    else
+        warn "llama-server systemd 启动失败，尝试手动启动 ..."
+        local model_dir
+        model_dir=$(get_data_path "models")
+        local model_path="${model_dir}/${MODEL_GGUF_FILENAME}"
+        local server_bin="${TRIAD_ROOT}/llama.cpp/build/bin/llama-server"
+        [[ ! -f "${server_bin}" ]] && server_bin="${TRIAD_ROOT}/llama.cpp/build/llama-server"
+        if [[ -f "${server_bin}" ]] && [[ -f "${model_path}" ]]; then
+            nohup "${server_bin}" \
+                --model "${model_path}" \
+                --host "${BIND_ADDRESS}" \
+                --port "${LLAMA_PORT}" \
+                --ctx-size 8192 \
+                --n-gpu-layers 99 \
+                --batch-size 512 \
+                --timeout 300 \
+                --chat-template chatml \
+                >> "${LOG_DIR}/llama-server.log" 2>&1 &
             sleep 2
-            waited=$((waited + 2))
-            if ! kill -0 "${comfyui_pid}" 2>/dev/null; then
-                fatal "ComfyUI 进程已退出\n日志: ${COMFYUI_LOG}\n修复: cat ${COMFYUI_LOG}"
-            fi
-            if [[ ${waited} -ge 60 ]]; then
-                fatal "ComfyUI 启动超时 (60 秒)\n日志: ${COMFYUI_LOG}\n修复: cat ${COMFYUI_LOG}"
-            fi
-            echo -n "."
-        done
-        echo ""
-        success "ComfyUI 启动成功 (PID: ${comfyui_pid})"
-        comfyui_ready=true
-    fi
-
-    # --- 2. 启动 Docker 后端 ---
-    step "启动 Docker 后端"
-
-    local compose_file="${SCRIPT_DIR}/docker-compose.hpc.yml"
-    if [[ ! -f "${compose_file}" ]]; then
-        compose_file="${SCRIPT_DIR}/triad/docker-compose.hpc.yml"
-        if [[ ! -f "${compose_file}" ]]; then
-            compose_file="docker-compose.hpc.yml"
-        fi
-    fi
-
-    if [[ ! -f "${compose_file}" ]]; then
-        fatal "未找到 docker-compose.hpc.yml"
-    fi
-
-    detail "Compose 文件: ${compose_file}"
-    detail "启动配置: hpc-full..."
-
-    cd "$(dirname "${compose_file}")" || fatal "无法进入 compose 文件目录"
-
-    docker compose -f "${compose_file}" --profile hpc-full up -d || \
-        fatal "Docker 容器启动失败\n修复: docker compose -f ${compose_file} logs"
-
-    success "Docker 容器已启动"
-
-    # --- 3. 等待容器就绪 ---
-    step "等待服务就绪"
-
-    detail "等待 llama-server 就绪..."
-    local llama_ready=false
-    local llama_wait=0
-    while [[ ${llama_wait} -lt 60 ]]; do
-        if curl -s --max-time 2 "http://localhost:18000/health" &>/dev/null; then
-            llama_ready=true
-            break
-        fi
-        sleep 2
-        llama_wait=$((llama_wait + 2))
-        echo -n "."
-    done
-    echo ""
-
-    if [[ "${llama_ready}" == true ]]; then
-        success "llama-server 就绪"
-    else
-        warn "llama-server 健康检查未响应 (可能仍在加载模型)"
-    fi
-
-    # --- 4. WSL2 网关绑定 ---
-    step "WSL2 网关绑定"
-
-    local bridge_script="${SCRIPT_DIR}/bridge/wsl2_gateway.sh"
-    if [[ ! -f "${bridge_script}" ]]; then
-        bridge_script="${SCRIPT_DIR}/wsl2_gateway.sh"
-    fi
-
-    if [[ -f "${bridge_script}" ]]; then
-        detail "执行: ${bridge_script} setup 8080 50051"
-        bash "${bridge_script}" setup 8080 50051 || warn "WSL2 网关绑定脚本执行失败"
-    else
-        warn "未找到 WSL2 网关绑定脚本: ${bridge_script}"
-        warn "跳过网关绑定 (WSL2 自动端口转发通常已足够)"
-    fi
-
-    # --- 5. 打印启动成功面板 ---
-    print_start_panel
-}
-
-###############################################################################
-# 启动成功面板
-###############################################################################
-
-print_start_panel() {
-    # 获取容器状态
-    local openclaw_status hermes_status llama_status qdrant_status registry_status
-    openclaw_status=$(docker ps --filter "name=openclaw" --format "{{.Status}}" 2>/dev/null || echo "未找到")
-    hermes_status=$(docker ps --filter "name=hermes" --format "{{.Status}}" 2>/dev/null || echo "未找到")
-    llama_status=$(docker ps --filter "name=llama-server" --format "{{.Status}}" 2>/dev/null || echo "未找到")
-    qdrant_status=$(docker ps --filter "name=qdrant" --format "{{.Status}}" 2>/dev/null || echo "未找到")
-    registry_status=$(docker ps --filter "name=registry" --format "{{.Status}}" 2>/dev/null || echo "未找到")
-
-    # 状态图标
-    local icon_openclaw icon_hermes icon_llama icon_qdrant icon_registry
-    if [[ -n "${openclaw_status}" && "${openclaw_status}" != "未找到" ]]; then
-        icon_openclaw="🟢"
-    else
-        icon_openclaw="🔴"
-    fi
-    if [[ -n "${hermes_status}" && "${hermes_status}" != "未找到" ]]; then
-        icon_hermes="🟢"
-    else
-        icon_hermes="🔴"
-    fi
-    if [[ -n "${llama_status}" && "${llama_status}" != "未找到" ]]; then
-        icon_llama="🟢"
-    else
-        icon_llama="🔴"
-    fi
-    if [[ -n "${qdrant_status}" && "${qdrant_status}" != "未找到" ]]; then
-        icon_qdrant="🟢"
-    else
-        icon_qdrant="🔴"
-    fi
-    if [[ -n "${registry_status}" && "${registry_status}" != "未找到" ]]; then
-        icon_registry="🟢"
-    else
-        icon_registry="🔴"
-    fi
-
-    # 获取 nvidia-smi 显存信息
-    local gpu_mem_total gpu_mem_used
-    gpu_mem_total=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -d ' ' || echo "22000")
-    gpu_mem_used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -n1 | tr -d ' ' || echo "0")
-
-    # 估算显存分配 (简化显示)
-    local llama_mem comfy_mem sys_mem free_mem
-    # llama-server 大约使用模型大小的 70% 显存
-    # Qwen-14B Q4_K_M 约 8.5GB，GPU offload 后约 9GB
-    llama_mem=9216
-    comfy_mem=2048
-    sys_mem=2048
-    free_mem=$((gpu_mem_total - llama_mem - comfy_mem - sys_mem))
-    if [[ ${free_mem} -lt 0 ]]; then free_mem=0; fi
-
-    local llama_bar_len=$((llama_mem * 40 / gpu_mem_total))
-    local comfy_bar_len=$((comfy_mem * 40 / gpu_mem_total))
-    local free_bar_len=$((free_mem * 40 / gpu_mem_total))
-    local sys_bar_len=$((40 - llama_bar_len - comfy_bar_len - free_bar_len))
-    if [[ ${sys_bar_len} -lt 0 ]]; then sys_bar_len=0; fi
-
-    # 构建进度条
-    local bar=""
-    for ((i=0; i<comfy_bar_len; i++)); do bar+="█"; done
-    for ((i=0; i<llama_bar_len; i++)); do bar+="▓"; done
-    for ((i=0; i<free_bar_len; i++)); do bar+="░"; done
-    for ((i=0; i<sys_bar_len; i++)); do bar+="▒"; done
-
-    echo ""
-    echo -e "${C_PURPLE}${C_BOLD}╔══════════════════════════════════════════════════════════════╗${C_RESET}"
-    echo -e "${C_PURPLE}${C_BOLD}║              🟣 Triad Control Panel 启动成功               ║${C_RESET}"
-    echo -e "${C_PURPLE}${C_BOLD}╠══════════════════════════════════════════════════════════════╣${C_RESET}"
-    echo -e "${C_PURPLE}║  Web UI:      http://localhost:8080/panel                   ║${C_RESET}"
-    echo -e "${C_PURPLE}║  Gateway:     ws://localhost:8080/ws/tasks                  ║${C_RESET}"
-    echo -e "${C_PURPLE}║  llama-srv:   http://localhost:18000/v1/chat/completions     ║${C_RESET}"
-    echo -e "${C_PURPLE}║  ComfyUI:     http://localhost:18188                        ║${C_RESET}"
-    echo -e "${C_PURPLE}${C_BOLD}╠══════════════════════════════════════════════════════════════╣${C_RESET}"
-    echo -e "${C_PURPLE}║  VRAM 分配 ( ${gpu_mem_total} MiB )${C_RESET}"
-    echo -e "${C_PURPLE}║    [${C_CYAN}2GB Emb${C_RESET}]${C_GREEN}[${bar}]${C_RESET}"
-    echo -e "${C_PURPLE}║    ${C_CYAN}█${C_RESET}=ComfyUI(${comfy_mem}MB) ${C_GREEN}▓${C_RESET}=LLM(${llama_mem}MB) ░=空闲(${free_mem}MB) ▒=系统(${sys_mem}MB)${C_RESET}"
-    echo -e "${C_PURPLE}${C_BOLD}╠══════════════════════════════════════════════════════════════╣${C_RESET}"
-    echo -e "${C_PURPLE}║  Docker 容器:                                              ║${C_RESET}"
-    echo -e "${C_PURPLE}║    openclaw     ${icon_openclaw} ${openclaw_status}${C_RESET}"
-    echo -e "${C_PURPLE}║    hermes       ${icon_hermes} ${hermes_status}${C_RESET}"
-    echo -e "${C_PURPLE}║    llama-server ${icon_llama} ${llama_status} (GPU 模式, -ngl 99)${C_RESET}"
-    echo -e "${C_PURPLE}║    qdrant       ${icon_qdrant} ${qdrant_status}${C_RESET}"
-    echo -e "${C_PURPLE}║    registry     ${icon_registry} ${registry_status}${C_RESET}"
-    echo -e "${C_PURPLE}${C_BOLD}╚══════════════════════════════════════════════════════════════╝${C_RESET}"
-    echo ""
-}
-
-###############################################################################
-# STOP 命令
-###############################################################################
-
-cmd_stop() {
-    step "停止 Triad 全站服务"
-
-    # 1. 优雅停止 Docker 容器
-    detail "停止 Docker 容器..."
-    local compose_file="${SCRIPT_DIR}/docker-compose.hpc.yml"
-    if [[ ! -f "${compose_file}" ]]; then
-        compose_file="${SCRIPT_DIR}/triad/docker-compose.hpc.yml"
-        if [[ ! -f "${compose_file}" ]]; then
-            compose_file="docker-compose.hpc.yml"
-        fi
-    fi
-
-    if [[ -f "${compose_file}" ]]; then
-        cd "$(dirname "${compose_file}")" || warn "无法进入 compose 目录"
-        docker compose -f "${compose_file}" --profile hpc-full down --timeout 30 || warn "docker compose down 部分失败"
-        success "Docker 容器已停止"
-    else
-        warn "未找到 docker-compose.hpc.yml，跳过 Docker 停止"
-    fi
-
-    # 2. 停止 ComfyUI
-    detail "停止 ComfyUI..."
-    local comfyui_pids
-    comfyui_pids=$(pgrep -f "python.*main.py.*18188" 2>/dev/null || true)
-    if [[ -n "${comfyui_pids}" ]]; then
-        detail "找到 ComfyUI PID: ${comfyui_pids}"
-        echo "${comfyui_pids}" | while read -r pid; do
-            if [[ -n "${pid}" ]]; then
-                detail "发送 SIGTERM 到 PID ${pid}..."
-                kill -TERM "${pid}" 2>/dev/null || true
-            fi
-        done
-
-        # 等待进程退出
-        local wait_count=0
-        while pgrep -f "python.*main.py.*18188" &>/dev/null && [[ ${wait_count} -lt 15 ]]; do
-            sleep 1
-            wait_count=$((wait_count + 1))
-            echo -n "."
-        done
-        echo ""
-
-        if pgrep -f "python.*main.py.*18188" &>/dev/null; then
-            warn "ComfyUI 未能在 15 秒内退出，发送 SIGKILL..."
-            pkill -9 -f "python.*main.py.*18188" 2>/dev/null || true
+            ok "llama-server 手动启动完成 (PID: $!)"
         else
-            success "ComfyUI 已停止"
+            err "llama-server 启动失败：缺少二进制文件或模型"
         fi
+    fi
+
+    # 2. 启动 Qdrant (Docker)
+    info "启动 Qdrant (HTTP: ${QDRANT_HTTP_PORT}, gRPC: ${QDRANT_GRPC_PORT}) ..."
+    local qdrant_dir
+    qdrant_dir=$(get_data_path "qdrant")
+    # 如果已有容器在运行，先停止
+    sudo docker stop triad-qdrant 2>/dev/null || true
+    sudo docker rm triad-qdrant 2>/dev/null || true
+    if sudo docker run -d \
+        --name triad-qdrant \
+        --restart unless-stopped \
+        -p "${QDRANT_HTTP_PORT}:6333" \
+        -p "${QDRANT_GRPC_PORT}:6334" \
+        -v "${qdrant_dir}/storage:/qdrant/storage" \
+        -v "${qdrant_dir}/config.yaml:/qdrant/config/production.yaml" \
+        qdrant/qdrant:latest; then
+        ok "Qdrant 容器已启动"
     else
-        info "ComfyUI 未在运行"
+        err "Qdrant 容器启动失败"
     fi
 
-    # 3. 等待 llama-server 优雅关闭
-    detail "确保 llama-server 优雅关闭..."
-    local llama_pids
-    llama_pids=$(docker ps --filter "name=llama-server" --format "{{.ID}}" 2>/dev/null || true)
-    if [[ -n "${llama_pids}" ]]; then
-        detail "等待 llama-server 写入记忆总线..."
-        sleep 3
-    fi
-
-    # 4. 停止 Web UI 开发服务器
-    detail "停止 Web UI 开发服务器..."
-    local webui_pids
-    webui_pids=$(pgrep -f "vite.*dev" 2>/dev/null || true)
-    if [[ -n "${webui_pids}" ]]; then
-        echo "${webui_pids}" | while read -r pid; do
-            kill -TERM "${pid}" 2>/dev/null || true
-        done
-        success "Web UI 开发服务器已停止"
+    # 3. 启动 ComfyUI (systemd 或手动)
+    info "启动 ComfyUI (端口: ${COMFYUI_PORT}) ..."
+    if sudo systemctl start comfyui 2>/dev/null; then
+        ok "ComfyUI 已启动"
     else
-        info "Web UI 开发服务器未在运行"
-    fi
-
-    success "Triad 全站已停止"
-}
-
-###############################################################################
-# STATUS 命令
-###############################################################################
-
-cmd_status() {
-    step "Triad 系统状态"
-
-    # 1. Docker 容器状态
-    echo ""
-    echo -e "${C_BOLD}${C_BLUE}📦 Docker 容器状态${C_RESET}"
-    echo -e "${C_BLUE}─────────────────────────────${C_RESET}"
-    if docker info &>/dev/null; then
-        docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | grep -E "(openclaw|hermes|llama|qdrant|registry|NAMES)" || echo "无相关容器运行"
-    else
-        warn "Docker 未运行"
-    fi
-
-    # 2. nvidia-smi 显存
-    echo ""
-    echo -e "${C_BOLD}${C_GREEN}🧠 GPU 显存 (nvidia-smi)${C_RESET}"
-    echo -e "${C_GREEN}─────────────────────────────${C_RESET}"
-    if cmd_exists nvidia-smi && nvidia-smi &>/dev/null; then
-        local gpu_name gpu_used gpu_total
-        gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n1 | sed 's/^[[:space:]]*//')
-        gpu_used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -n1 | tr -d ' ')
-        gpu_total=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -n1 | tr -d ' ')
-        local used_pct
-        used_pct=$((gpu_used * 100 / gpu_total))
-
-        echo -e "GPU 0: ${C_BOLD}${gpu_name}${C_RESET}"
-        echo -e "  Used: ${gpu_used}MB / ${gpu_total}MB (${used_pct}%)"
-        echo ""
-        echo "  Processes:"
-        nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader | \
-            while IFS=',' read -r pid proc_name mem; do
-                if [[ -n "${pid}" ]]; then
-                    echo -e "    ${proc_name}  PID ${pid}  ${mem}"
-                fi
-            done
-    else
-        warn "nvidia-smi 不可用"
-    fi
-
-    # 3. ComfyUI 状态
-    echo ""
-    echo -e "${C_BOLD}${C_CYAN}🎨 ComfyUI 状态${C_RESET}"
-    echo -e "${C_CYAN}─────────────────────────────${C_RESET}"
-    local comfyui_pid
-    comfyui_pid=$(pgrep -f "python.*main.py.*18188" | head -n1 || true)
-    if [[ -n "${comfyui_pid}" ]]; then
-        local comfyui_cpu comfyui_mem
-        comfyui_cpu=$(ps -p "${comfyui_pid}" -o %cpu= 2>/dev/null | tr -d ' ' || echo "N/A")
-        comfyui_mem=$(ps -p "${comfyui_pid}" -o %mem= 2>/dev/null | tr -d ' ' || echo "N/A")
-        echo -e "Host: localhost:18188  ${C_GREEN}🟢 就绪${C_RESET}"
-        echo "PID: ${comfyui_pid}"
-        echo "CPU: ${comfyui_cpu}%"
-        echo "MEM: ${comfyui_mem}%"
-    else
-        echo -e "Host: localhost:18188  ${C_RED}🔴 未运行${C_RESET}"
-    fi
-
-    # 4. llama-server 状态
-    echo ""
-    echo -e "${C_BOLD}${C_PURPLE}🧠 llama-server 状态${C_RESET}"
-    echo -e "${C_PURPLE}─────────────────────────────${C_RESET}"
-    local llama_health llama_mode llama_speed
-    llama_health=$(curl -s --max-time 3 "http://localhost:18000/health" -o /dev/null -w "%{http_code}" 2>/dev/null || echo "000")
-
-    if [[ "${llama_health}" == "200" ]]; then
-        echo -e "Health: ${C_GREEN}🟢 /health 返回 200${C_RESET}"
-        # 尝试获取更多信息
-        local props
-        props=$(curl -s --max-time 3 "http://localhost:18000/props" 2>/dev/null || echo "")
-        if echo "${props}" | grep -q "cuda"; then
-            llama_mode="GPU (-ngl 99)"
+        warn "ComfyUI systemd 启动失败，尝试手动启动 ..."
+        local comfy_dir
+        comfy_dir=$(get_data_path "comfyui")
+        local comfy_venv="${comfy_dir}/venv"
+        if [[ -f "${comfy_venv}/bin/python" ]] && [[ -d "${comfy_dir}/ComfyUI" ]]; then
+            cd "${comfy_dir}/ComfyUI" || true
+            nohup "${comfy_venv}/bin/python" main.py \
+                --listen "${BIND_ADDRESS}" \
+                --port "${COMFYUI_PORT}" \
+                >> "${LOG_DIR}/comfyui.log" 2>&1 &
+            sleep 2
+            ok "ComfyUI 手动启动完成 (PID: $!)"
         else
-            llama_mode="CPU"
-        fi
-        echo "Mode: ${llama_mode}"
-    else
-        # 尝试 8080 端口
-        llama_health=$(curl -s --max-time 3 "http://localhost:18000/health" -o /dev/null -w "%{http_code}" 2>/dev/null || echo "000")
-        if [[ "${llama_health}" == "200" ]]; then
-            echo -e "Health: ${C_GREEN}🟢 /health 返回 200 (端口 8080)${C_RESET}"
-            echo "Mode: GPU (-ngl 99)"
-        else
-            echo -e "Health: ${C_RED}🔴 /health 无响应 (HTTP ${llama_health})${C_RESET}"
+            err "ComfyUI 启动失败：缺少虚拟环境或代码"
         fi
     fi
 
-    # 5. Web UI 状态
-    echo ""
-    echo -e "${C_BOLD}${C_YELLOW}🌐 Web UI${C_RESET}"
-    echo -e "${C_YELLOW}─────────────────────────────${C_RESET}"
-    local webui_status
-    webui_status=$(curl -s --max-time 3 -o /dev/null -w "%{http_code}" "http://localhost:8080/panel" 2>/dev/null || echo "000")
-    if [[ "${webui_status}" == "200" || "${webui_status}" == "301" || "${webui_status}" == "302" ]]; then
-        echo -e "Status: ${C_GREEN}🟢 http://localhost:8080/panel${C_RESET}"
+    # 4. 启动 OpenClaw (Node.js 服务，如果有)
+    info "启动 OpenClaw (端口: ${OPENCLAW_PORT}) ..."
+    local openclaw_dir="${TRIAD_ROOT}/openclaw"
+    if [[ -d "${openclaw_dir}" ]] && [[ -f "${openclaw_dir}/package.json" ]]; then
+        pushd "${openclaw_dir}" >/dev/null || true
+        if [[ -f .env ]]; then
+            export $(grep -v '^#' .env | xargs) 2>/dev/null || true
+        fi
+        nohup npm start >> "${LOG_DIR}/openclaw.log" 2>&1 &
+        popd >/dev/null || true
+        ok "OpenClaw 已启动 (PID: $!)"
     else
-        echo -e "Status: ${C_RED}🔴 http://localhost:8080/panel (HTTP ${webui_status})${C_RESET}"
+        warn "未找到 OpenClaw 目录，跳过启动"
     fi
 
-    # 6. 系统负载
-    echo ""
-    echo -e "${C_BOLD}${C_BLUE}📊 系统负载${C_RESET}"
-    echo -e "${C_BLUE}─────────────────────────────${C_RESET}"
-    local loadavg
-    loadavg=$(cat /proc/loadavg | awk '{print $1, $2, $3}')
-    echo "Load average: ${loadavg}"
-    if cmd_exists free; then
-        local mem_info
-        mem_info=$(free -h | grep "Mem:" | awk '{print "Total: " $2, "Used: " $3, "Free: " $4}')
-        echo "Memory: ${mem_info}"
+    # 5. 启动 Hermes (如果有)
+    info "启动 Hermes (端口: ${HERMES_PORT}) ..."
+    local hermes_dir="${TRIAD_ROOT}/hermes"
+    if [[ -d "${hermes_dir}" ]] && [[ -f "${hermes_dir}/package.json" ]]; then
+        pushd "${hermes_dir}" >/dev/null || true
+        if [[ -f .env ]]; then
+            export $(grep -v '^#' .env | xargs) 2>/dev/null || true
+        fi
+        nohup npm start >> "${LOG_DIR}/hermes.log" 2>&1 &
+        popd >/dev/null || true
+        ok "Hermes 已启动 (PID: $!)"
+    else
+        warn "未找到 Hermes 目录，跳过启动"
     fi
 
-    echo ""
-}
+    # 6. 启动 MCP Server (如果有)
+    info "启动 MCP Server (端口: ${MCP_SERVER_PORT}) ..."
+    local mcp_dir="${TRIAD_ROOT}/mcp-server"
+    if [[ -d "${mcp_dir}" ]]; then
+        if [[ -f "${mcp_dir}/package.json" ]]; then
+            pushd "${mcp_dir}" >/dev/null || true
+            nohup npm start >> "${LOG_DIR}/mcp-server.log" 2>&1 &
+            popd >/dev/null || true
+            ok "MCP Server (Node) 已启动"
+        elif [[ -f "${mcp_dir}/requirements.txt" ]] || [[ -f "${mcp_dir}/main.py" ]]; then
+            if [[ -f "${TRIAD_ROOT}/venv/bin/python" ]]; then
+                pushd "${mcp_dir}" >/dev/null || true
+                nohup "${TRIAD_ROOT}/venv/bin/python" main.py >> "${LOG_DIR}/mcp-server.log" 2>&1 &
+                popd >/dev/null || true
+                ok "MCP Server (Python) 已启动"
+            fi
+        fi
+    else
+        warn "未找到 MCP Server 目录，跳过启动"
+    fi
 
-###############################################################################
-# RESTART 命令
-###############################################################################
+    # 7. 启动 Embedding API (如果有)
+    info "启动 Embedding API (端口: ${EMBEDDING_API_PORT}) ..."
+    local emb_dir="${TRIAD_ROOT}/embedding-api"
+    if [[ -d "${emb_dir}" ]] && [[ -f "${TRIAD_ROOT}/venv/bin/python" ]]; then
+        pushd "${emb_dir}" >/dev/null || true
+        nohup "${TRIAD_ROOT}/venv/bin/python" main.py >> "${LOG_DIR}/embedding-api.log" 2>&1 &
+        popd >/dev/null || true
+        ok "Embedding API 已启动"
+    else
+        warn "未找到 Embedding API，跳过启动"
+    fi
 
-cmd_restart() {
-    step "重启 Triad"
-    cmd_stop
-    echo ""
     sleep 2
-    cmd_start
+    line
+    ok "全部服务启动指令已发送"
+    info "查看状态: ${SCRIPT_NAME} status"
+    info "查看日志: ${SCRIPT_NAME} logs"
+    line
 }
 
-###############################################################################
-# LOGS 命令
-###############################################################################
+# 停止所有服务
+cmd_stop() {
+    highlight "停止 Triad 全部服务"
+    load_env
 
+    line
+    info "正在停止服务 ..."
+    line
+
+    # 停止 systemd 服务
+    sudo systemctl stop llama-server 2>/dev/null && ok "llama-server 已停止" || warn "llama-server 未运行或停止失败"
+    sudo systemctl stop comfyui 2>/dev/null && ok "ComfyUI 已停止" || warn "ComfyUI 未运行或停止失败"
+
+    # 停止 Docker 容器
+    sudo docker stop triad-qdrant 2>/dev/null && ok "Qdrant 容器已停止" || warn "Qdrant 容器未运行"
+
+    # 停止 Node.js / Python 后台进程（通过端口匹配）
+    local ports=("${OPENCLAW_PORT}" "${HERMES_PORT}" "${MCP_SERVER_PORT}" "${EMBEDDING_API_PORT}")
+    for port in "${ports[@]}"; do
+        local pids
+        pids=$(lsof -ti :"${port}" 2>/dev/null || true)
+        if [[ -n "${pids}" ]]; then
+            info "终止占用端口 ${port} 的进程: ${pids}"
+            echo "${pids}" | xargs kill -TERM 2>/dev/null || true
+            sleep 1
+            # 强制清理残留
+            pids=$(lsof -ti :"${port}" 2>/dev/null || true)
+            if [[ -n "${pids}" ]]; then
+                echo "${pids}" | xargs kill -KILL 2>/dev/null || true
+            fi
+            ok "端口 ${port} 已释放"
+        fi
+    done
+
+    # 额外清理 llama-server 残留进程
+    local llama_pids
+    llama_pids=$(pgrep -f "llama-server.*--port.*${LLAMA_PORT}" 2>/dev/null || true)
+    if [[ -n "${llama_pids}" ]]; then
+        echo "${llama_pids}" | xargs kill -TERM 2>/dev/null || true
+        sleep 1
+        llama_pids=$(pgrep -f "llama-server.*--port.*${LLAMA_PORT}" 2>/dev/null || true)
+        if [[ -n "${llama_pids}" ]]; then
+            echo "${llama_pids}" | xargs kill -KILL 2>/dev/null || true
+        fi
+    fi
+
+    # 清理 ComfyUI 残留
+    local comfy_pids
+    comfy_pids=$(pgrep -f "ComfyUI.*--port.*${COMFYUI_PORT}" 2>/dev/null || true)
+    if [[ -n "${comfy_pids}" ]]; then
+        echo "${comfy_pids}" | xargs kill -TERM 2>/dev/null || true
+    fi
+
+    line
+    ok "全部服务停止指令已发送"
+    line
+}
+
+# 查看服务状态
+cmd_status() {
+    highlight "Triad 服务运行状态"
+    load_env
+
+    line
+    printf "%-20s %-10s %-25s %-s\n" "服务" "状态" "监听地址" "备注"
+    line
+
+    local services=(
+        "llama-server:${LLAMA_PORT}"
+        "comfyui:${COMFYUI_PORT}"
+        "openclaw:${OPENCLAW_PORT}"
+        "hermes:${HERMES_PORT}"
+        "qdrant-http:${QDRANT_HTTP_PORT}"
+        "qdrant-grpc:${QDRANT_GRPC_PORT}"
+        "mcp-server:${MCP_SERVER_PORT}"
+        "embedding-api:${EMBEDDING_API_PORT}"
+    )
+
+    for svc in "${services[@]}"; do
+        local name port pid status addr
+        name="${svc%%:*}"
+        port="${svc##*:}"
+        pid=$(lsof -ti :"${port}" 2>/dev/null || true)
+        if [[ -n "${pid}" ]]; then
+            status="${C_GREEN}运行中${C_RESET}"
+            addr="${BIND_ADDRESS}:${port}"
+        else
+            status="${C_RED}未运行${C_RESET}"
+            addr="-"
+        fi
+        printf "%-20s %-20b %-25s PID:%s\n" "${name}" "${status}" "${addr}" "${pid:-N/A}"
+    done
+
+    line
+    info "Docker 容器状态:"
+    sudo docker ps --filter "name=triad-" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || true
+    line
+
+    info "systemd 服务状态:"
+    for svc in llama-server comfyui; do
+        local sys_status
+        sys_status=$(sudo systemctl is-active "${svc}" 2>/dev/null || echo "unknown")
+        if [[ "${sys_status}" == "active" ]]; then
+            printf "%-20s ${C_GREEN}%-20s${C_RESET}\n" "${svc}" "${sys_status}"
+        else
+            printf "%-20s ${C_YELLOW}%-20s${C_RESET}\n" "${svc}" "${sys_status}"
+        fi
+    done
+    line
+
+    info "GPU 状态:"
+    nvidia-smi --query-gpu=name,temperature.gpu,utilization.gpu,memory.used,memory.free --format=csv,noheader 2>/dev/null || warn "无法获取 GPU 状态"
+    line
+}
+
+# 查看日志
 cmd_logs() {
-    local service=${1:-"all"}
+    local service="${1:-all}"
+    local lines="${2:-100}"
 
-    case "${service}" in
-        openclaw)
-            step "OpenClaw 日志"
-            docker logs --tail 100 -f "openclaw" 2>/dev/null || warn "OpenClaw 容器未运行"
-            ;;
-        hermes)
-            step "Hermes 日志"
-            docker logs --tail 100 -f "hermes" 2>/dev/null || warn "Hermes 容器未运行"
-            ;;
-        llama)
-            step "llama-server 日志"
-            docker logs --tail 100 -f "llama-server" 2>/dev/null || warn "llama-server 容器未运行"
-            ;;
-        comfyui)
-            step "ComfyUI 日志"
-            if [[ -f "${COMFYUI_LOG}" ]]; then
-                tail -n 100 -f "${COMFYUI_LOG}"
+    highlight "查看日志: ${service} (最近 ${lines} 行)"
+    init_log_dir
+
+    if [[ "${service}" == "all" ]]; then
+        for logfile in "${LOG_DIR}"/*.log; do
+            if [[ -f "${logfile}" ]]; then
+                local basename
+                basename=$(basename "${logfile}")
+                line
+                echo -e "${C_CYAN}=== ${basename} ===${C_RESET}"
+                tail -n "${lines}" "${logfile}" 2>/dev/null || true
+            fi
+        done
+        line
+    else
+        local logfile="${LOG_DIR}/${service}.log"
+        if [[ -f "${logfile}" ]]; then
+            tail -n "${lines}" "${logfile}" 2>/dev/null || true
+        else
+            # 尝试 systemd journal
+            if sudo systemctl is-active --quiet "${service}" 2>/dev/null; then
+                sudo journalctl -u "${service}" -n "${lines}" --no-pager 2>/dev/null || true
             else
-                warn "未找到 ComfyUI 日志: ${COMFYUI_LOG}"
+                err "未找到日志文件: ${logfile}"
             fi
-            ;;
-        all|*)
-            step "所有服务日志"
-            echo -e "${C_BOLD}${C_BLUE}─── Docker 容器日志 (最近 50 行) ───${C_RESET}"
-            local compose_file="${SCRIPT_DIR}/docker-compose.hpc.yml"
-            if [[ ! -f "${compose_file}" ]]; then
-                compose_file="${SCRIPT_DIR}/triad/docker-compose.hpc.yml"
-                if [[ ! -f "${compose_file}" ]]; then
-                    compose_file="docker-compose.hpc.yml"
-                fi
-            fi
-            if [[ -f "${compose_file}" ]]; then
-                cd "$(dirname "${compose_file}")" || true
-                docker compose -f "${compose_file}" logs --tail 50 2>/dev/null || warn "Docker compose logs 失败"
-            fi
-            echo ""
-            echo -e "${C_BOLD}${C_CYAN}─── ComfyUI 日志 (最近 50 行) ───${C_RESET}"
-            if [[ -f "${COMFYUI_LOG}" ]]; then
-                tail -n 50 "${COMFYUI_LOG}"
-            else
-                warn "未找到 ComfyUI 日志"
-            fi
-            ;;
-    esac
+        fi
+    fi
 }
 
-###############################################################################
+# 更新（从 GitHub 拉取更新）
+cmd_update() {
+    highlight "更新 Triad 组件"
+    load_env
+
+    line
+    info "1. 拉取 Triad 项目更新 ..."
+    pushd "${TRIAD_ROOT}" >/dev/null || fatal "无法进入项目目录"
+    git fetch origin || warn "git fetch 失败"
+    git status || true
+    read -rp "是否执行 git pull? [y/N] " confirm
+    if [[ "${confirm}" == [yY]* ]]; then
+        git pull --ff-only || warn "git pull 失败，可能存在本地冲突"
+    fi
+    popd >/dev/null || true
+
+    info "2. 更新 llama.cpp ..."
+    local llama_dir="${TRIAD_ROOT}/llama.cpp"
+    if [[ -d "${llama_dir}/.git" ]]; then
+        pushd "${llama_dir}" >/dev/null || true
+        git fetch origin
+        git pull --ff-only || warn "llama.cpp 更新失败"
+        info "重新编译 llama.cpp ..."
+        rm -rf build
+        cmake -B build -DLLAMA_CUDA=ON -DLLAMA_CUDA_F16=ON -DCMAKE_CUDA_ARCHITECTURES="75" -DLLAMA_BUILD_SERVER=ON -DCMAKE_BUILD_TYPE=Release .
+        make -C build -j"$(nproc)" || warn "llama.cpp 编译失败"
+        sudo systemctl restart llama-server 2>/dev/null || warn "llama-server 重启失败"
+        popd >/dev/null || true
+    fi
+
+    info "3. 更新 ComfyUI ..."
+    local comfy_dir
+    comfy_dir=$(get_data_path "comfyui")
+    if [[ -d "${comfy_dir}/ComfyUI/.git" ]]; then
+        pushd "${comfy_dir}/ComfyUI" >/dev/null || true
+        git pull --ff-only || warn "ComfyUI 更新失败"
+        popd >/dev/null || true
+    fi
+
+    info "4. 更新 Docker 镜像 ..."
+    sudo docker pull qdrant/qdrant:latest 2>/dev/null || warn "Qdrant 镜像更新失败"
+
+    info "5. 重新构建 Web UI ..."
+    build_web_ui
+
+    line
+    ok "更新流程执行完毕"
+    info "建议运行: ${SCRIPT_NAME} status"
+    line
+}
+
 # 帮助信息
-###############################################################################
-
-usage() {
+show_help() {
     cat <<EOF
-
-${C_BOLD}${C_PURPLE}Triad Manager v${SCRIPT_VERSION}${C_RESET}
-三层 AI Agent 系统一键部署与启停工具
+${C_BOLD}Triad Manager v${SCRIPT_VERSION}${C_RESET}
+一键部署脚本：原生 Ubuntu 22.04 (WSL2) + 单卡魔改 RTX 2080Ti 22GB
 
 ${C_BOLD}用法:${C_RESET}
-  ./${SCRIPT_NAME} [command] [options]
+    ${SCRIPT_NAME} <命令> [选项]
 
 ${C_BOLD}命令:${C_RESET}
-  ${C_GREEN}install${C_RESET}   一键安装环境（首次部署）
-  ${C_GREEN}start${C_RESET}     一键启动全站服务
-  ${C_GREEN}stop${C_RESET}      一键停止全站服务
-  ${C_GREEN}status${C_RESET}    查看系统状态
-  ${C_GREEN}restart${C_RESET}   重启全站服务
-  ${C_GREEN}logs${C_RESET}      查看日志 [service]
+    install         一键安装所有依赖与服务
+    start           启动所有服务
+    stop            停止所有服务
+    status          查看所有服务运行状态
+    logs [服务] [行数] 查看日志（默认全部，最近100行）
+    update          从 GitHub 拉取更新并重新编译
+    help            显示此帮助信息
 
-${C_BOLD}logs 子命令:${C_RESET}
-  ${C_CYAN}openclaw${C_RESET}   OpenClaw 容器日志
-  ${C_CYAN}hermes${C_RESET}     Hermes 容器日志
-  ${C_CYAN}llama${C_RESET}      llama-server 容器日志
-  ${C_CYAN}comfyui${C_RESET}    ComfyUI 本地日志
-  ${C_CYAN}all${C_RESET}        所有日志 (默认)
+${C_BOLD}install 流程:${C_RESET}
+    1. 系统检查（WSL2, Ubuntu 22.04, NVMe, 2080Ti）
+    2. 配置国内镜像源（apt/pip/npm/docker）
+    3. 安装 docker-ce + nvidia-container-toolkit
+    4. 安装 Python 3.10 + pip 依赖
+    5. 安装 Node.js 18 + npm 依赖
+    6. 编译安装 llama.cpp（CUDA 支持，Turing SM75）
+    7. 下载 Qwen-14B Q4_K_M GGUF 模型到数据盘
+    8. 配置 ComfyUI venv
+    9. 生成 .env 文件（大端口 + 0.0.0.0）
+    10. 构建 Web UI
+    11. 安装后测试验证
+
+${C_BOLD}端口配置（大端口号 +10000）:${C_RESET}
+    llama-server:      ${LLAMA_PORT}
+    OpenClaw:           ${OPENCLAW_PORT}
+    Hermes:             ${HERMES_PORT}
+    ComfyUI:            ${COMFYUI_PORT}
+    Qdrant HTTP:        ${QDRANT_HTTP_PORT}
+    Qdrant gRPC:        ${QDRANT_GRPC_PORT}
+    Embedding API:      ${EMBEDDING_API_PORT}
+    MCP Server:         ${MCP_SERVER_PORT}
 
 ${C_BOLD}示例:${C_RESET}
-  ./${SCRIPT_NAME} install            # 首次安装
-  ./${SCRIPT_NAME} start              # 启动所有服务
-  ./${SCRIPT_NAME} stop               # 停止所有服务
-  ./${SCRIPT_NAME} status             # 查看状态
-  ./${SCRIPT_NAME} restart            # 重启
-  ./${SCRIPT_NAME} logs llama         # 查看 llama-server 日志
-  ./${SCRIPT_NAME} logs all           # 查看所有日志
+    一键安装并记录日志:
+        ./${SCRIPT_NAME} install 2>&1 | tee install.log
 
-${C_BOLD}环境变量:${C_RESET}
-  TRIAD_ROOT          默认: ${TRIAD_ROOT}
-  HF_ENDPOINT         默认: ${HF_ENDPOINT_URL}
-  NPM_REGISTRY        默认: ${NPM_REGISTRY}
+    启动服务:
+        ./${SCRIPT_NAME} start
 
-${C_BOLD}国内镜像源:${C_RESET}
-  Ubuntu apt:  清华源 (${UBUNTU_MIRROR})
-  Docker:      中科大 / 网易云 / 百度云 镜像加速
-  npm:         淘宝源 (${NPM_REGISTRY})
-  HuggingFace: hf-mirror.com
+    查看 llama-server 最后50行日志:
+        ./${SCRIPT_NAME} logs llama-server 50
 
-${C_BOLD}硬件要求:${C_RESET}
-  - WSL2 Ubuntu 22.04+
-  - NVIDIA GPU (CUDA 12+)
-  - ext4 文件系统 (推荐)
-  - Docker + NVIDIA Container Runtime
+    停止所有服务:
+        ./${SCRIPT_NAME} stop
 
-${C_BOLD}故障排除:${C_RESET}
-  1. Docker 未运行:   sudo systemctl start docker
-  2. NVIDIA 驱动:     wsl --shutdown (Windows PowerShell)
-  3. 显存不足:        调低 ngl 层数或换用更小模型
-  4. 模型下载失败:    wget ${LLAMA_MODEL_URL}
-  5. ComfyUI 失败:    cat ${COMFYUI_LOG}
+${C_BOLD}数据盘路径:${C_RESET}
+    模型文件:  $(get_data_path "models")
+    ComfyUI:   $(get_data_path "comfyui")
+    Qdrant:    $(get_data_path "qdrant")
+    日志目录:  ${LOG_DIR}
 
+${C_BOLD}注意:${C_RESET}
+    - 本脚本针对原生 Docker（非 Docker Desktop）设计
+    - llama.cpp 在宿主机（WSL2 Ubuntu）直接编译，非容器内
+    - 安装完成后请重新登录或执行 newgrp docker 以使用 docker 免 sudo
+    - 2080Ti 22GB 建议加载 Q4_K_M 量化模型以获得最佳性能
 EOF
 }
 
-###############################################################################
 # 主入口
-###############################################################################
-
 main() {
-    # 无参数时显示帮助
+    # 如果没有参数，显示帮助
     if [[ $# -eq 0 ]]; then
-        usage
-        exit 1
+        show_help
+        exit 0
     fi
 
-    local command=$1
+    local cmd="$1"
     shift || true
 
-    case "${command}" in
+    case "${cmd}" in
         install)
-            cmd_install
+            cmd_install "$@"
             ;;
         start)
-            cmd_start
+            cmd_start "$@"
             ;;
         stop)
-            cmd_stop
+            cmd_stop "$@"
             ;;
         status)
-            cmd_status
-            ;;
-        restart)
-            cmd_restart
+            cmd_status "$@"
             ;;
         logs)
-            cmd_logs "${1:-all}"
+            cmd_logs "$@"
+            ;;
+        update)
+            cmd_update "$@"
             ;;
         help|--help|-h)
-            usage
-            exit 0
+            show_help
             ;;
         *)
-            error "未知命令: ${command}"
-            usage
+            err "未知命令: ${cmd}"
+            show_help
             exit 1
             ;;
     esac

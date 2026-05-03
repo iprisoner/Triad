@@ -166,7 +166,7 @@ services:
       CLAWPOD_IMAGE_PREFIX: "triad/clawpod"
 
       # Hermes 认知层连接
-      HERMES_AGENT_URL: "http://hermes:8000"
+      HERMES_AGENT_URL: "http://hermes:18000"
       HERMES_ACP_ENDPOINT: "tcp://hermes:17001"
 
       # MCP Registry 连接
@@ -185,7 +185,7 @@ services:
     ports:
       - "17001:17001"      # ACP Agent Control Protocol
       - "17002:17002"      # WebSocket 流式推送
-      - "8080:8080"      # HTTP API / 技能市场 UI
+      - "18080:18080"      # HTTP API / 技能市场 UI
 
     volumes:
       - openclaw-state:/app/state
@@ -197,7 +197,7 @@ services:
       - triad-worker
 
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:18080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -321,7 +321,7 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
 
     ports:
-      - "8000:8000"      # Hermes HTTP API
+      - "18000:18000"      # Hermes HTTP API
       - "19000:19000"      # Embedding 推理 API (内部高频调用)
 
     volumes:
@@ -337,7 +337,7 @@ services:
       - "host.docker.internal:host-gateway"
 
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:18000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3

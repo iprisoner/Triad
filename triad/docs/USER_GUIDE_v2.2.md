@@ -288,8 +288,8 @@ nano .env
 ╔═══════════════════════════════════════════════════════════╗
 ║              🟣 Triad Station v2.2 启动成功              ║
 ╠═══════════════════════════════════════════════════════════╣
-║  Web UI:     http://localhost:8080/panel                  ║
-║  Gateway:    ws://localhost:8080/ws/tasks               ║
+║  Web UI:     http://localhost:18080/panel                  ║
+║  Gateway:    ws://localhost:18080/ws/tasks               ║
 ║  llama-server: http://localhost:18000/v1/chat/completions ║
 ║  ComfyUI:   http://localhost:18188                        ║
 ╠═══════════════════════════════════════════════════════════╣
@@ -304,7 +304,7 @@ nano .env
 ### 5.4 Windows 浏览器访问
 
 打开 Windows 浏览器：
-- `http://localhost:8080/panel` → 龙虾控制台
+- `http://localhost:18080/panel` → 龙虾控制台
 - 顶部 Tab 切换：🦞 / 🎨 / 📊
 
 ### 5.5 第一次对话

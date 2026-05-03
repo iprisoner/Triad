@@ -42,8 +42,8 @@ bash bridge/wsl2_gateway.sh setup
 docker compose up -d
 
 # 5. 在 Windows 浏览器打开
-#    http://localhost:8080  → ClawPanel 前端
-#    http://localhost:8000  → Triad API
+#    http://localhost:18080  → ClawPanel 前端
+#    http://localhost:18000  → Triad API
 ```
 
 ---
@@ -55,9 +55,9 @@ docker compose up -d
 │                    Windows 宿主机                              │
 │  ┌─────────────┐   ┌─────────────┐   ┌─────────────────────┐  │
 │  │ 浏览器       │   │ PowerShell  │   │ netsh portproxy     │  │
-│  │ localhost   │←──│ 防火墙规则  │←──│ 127.0.0.1:8080     │  │
+│  │ localhost   │←──│ 防火墙规则  │←──│ 0.0.0.0:18080     │  │
 │  │ :8080       │   │             │   │    ↓                │  │
-│  └─────────────┘   └─────────────┘   │ WSL2_IP:8080        │  │
+│  └─────────────┘   └─────────────┘   │ WSL2_IP:18080        │  │
 │                                      └─────────────────────┘  │
 │                          │                                    │
 │                    Hyper-V 虚拟交换机                           │
@@ -455,8 +455,8 @@ sudo apt install nvidia-driver-535    # 不要这样做！
 ### 陷阱 5: Windows 访问 WSL2 内 Docker 服务
 
 #### 症状
-- Windows 浏览器访问 `http://localhost:8080` 无响应
-- `curl http://localhost:8080` 在 WSL2 内成功，Windows PowerShell 中失败
+- Windows 浏览器访问 `http://localhost:18080` 无响应
+- `curl http://localhost:18080` 在 WSL2 内成功，Windows PowerShell 中失败
 - 防火墙拦截连接，或连接超时
 
 #### 根本原因
@@ -469,7 +469,7 @@ WSL2 是一个独立的虚拟网络命名空间。虽然较新的 Windows 11 支
 | Windows 11 22H2+ | 默认启用 | 较好 |
 | Windows 10 + WSL1 | 直接共享网络栈 | 好（但 WSL1 不推荐） |
 
-即使 `localhostForwarding=true`，Docker 的 `-p 8080:8080` 绑定到 `0.0.0.0` 后，Windows 侧有时仍然无法直接 `localhost:8080` 访问。
+即使 `localhostForwarding=true`，Docker 的 `-p 18080:18080` 绑定到 `0.0.0.0` 后，Windows 侧有时仍然无法直接 `localhost:18080` 访问。
 
 #### 解决方案
 
@@ -483,7 +483,7 @@ bash bridge/wsl2_gateway.sh setup
 这会在 Windows 侧执行：
 ```powershell
 # PowerShell（管理员）
-netsh interface portproxy add v4tov4 listenport=8080 listenaddress=127.0.0.1 connectport=8080 connectaddress=<WSL2_IP>
+netsh interface portproxy add v4tov4 listenport=8080 listenaddress=0.0.0.0 connectport=8080 connectaddress=<WSL2_IP>
 ```
 
 Windows 侧验证：
@@ -492,7 +492,7 @@ Windows 侧验证：
 netsh interface portproxy show v4tov4
 
 # 测试端口
-Test-NetConnection -ComputerName 127.0.0.1 -Port 8080
+Test-NetConnection -ComputerName 127.0.0.1 -Port 18080
 ```
 
 **方案 B: 直接访问 WSL2 IP**
@@ -503,7 +503,7 @@ ip addr show eth0 | grep 'inet '
 # 例如: 172.20.15.3
 
 # 在 Windows 浏览器直接访问
-# http://172.20.15.3:8080
+# http://172.20.15.3:18080
 ```
 
 缺点：每次 WSL2 重启后 IP 会变化。
@@ -537,8 +537,8 @@ environment:
 
 ```powershell
 # 手动以管理员运行 PowerShell
-New-NetFirewallRule -DisplayName "Triad-WSL2-8080" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8080
-New-NetFirewallRule -DisplayName "Triad-WSL2-8000" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8000
+New-NetFirewallRule -DisplayName "Triad-WSL2-18080" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 18080
+New-NetFirewallRule -DisplayName "Triad-WSL2-18000" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 18000
 New-NetFirewallRule -DisplayName "Triad-WSL2-16333" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 16333
 ```
 
@@ -675,11 +675,11 @@ TRIAD_ROOT=/var/lib/triad bash init.sh
 **用途**: 配置 Windows 到 WSL2 的端口转发
 
 ```bash
-# 配置默认端口 (8080, 8000, 16333, 16379)
+# 配置默认端口 (18080, 18000, 16333, 16379)
 bash bridge/wsl2_gateway.sh setup
 
 # 配置指定端口
-bash bridge/wsl2_gateway.sh setup 8080 3000 9090
+bash bridge/wsl2_gateway.sh setup 18080 3000 9090
 
 # 自动检测 Docker 容器端口并配置
 bash bridge/wsl2_gateway.sh auto
@@ -698,7 +698,7 @@ bash bridge/wsl2_gateway.sh enable-localhost
 
 # 环境变量控制
 WSL2_AUTO_CLEAN=true bash bridge/wsl2_gateway.sh setup
-WSL2_GATEWAY_PORTS="8080 3000" bash bridge/wsl2_gateway.sh setup
+WSL2_GATEWAY_PORTS="18080 3000" bash bridge/wsl2_gateway.sh setup
 ```
 
 **需要管理员权限的操作**（脚本会自动尝试，失败时给出手动命令）：
@@ -728,7 +728,7 @@ bash bridge/wsl2_gateway.sh setup
 | `nvidia-smi` 在容器内失败 | toolkit 未配置 | `docker info \| grep nvidia` | 安装 nvidia-container-toolkit |
 | GPU 显存显示不对 | WSL2 透传显示宿主机信息 | Windows 侧也运行 nvidia-smi | 这是正常行为，显存以物理为准 |
 | 构建速度极慢 | 在 /mnt/ 下执行 Docker | `pwd` | `cd ~ && docker build ...` |
-| `localhost:8080` 时通时不通 | WSL2 localhostForwarding 不稳定 | 检查 Windows 版本 | 使用 `wsl2_gateway.sh` 的 netsh 方案 |
+| `localhost:18080` 时通时不通 | WSL2 localhostForwarding 不稳定 | 检查 Windows 版本 | 使用 `wsl2_gateway.sh` 的 netsh 方案 |
 
 ---
 
@@ -826,12 +826,12 @@ Windows 宿主机
 ```
 
 **数据包流向**（Windows 浏览器 → Triad API）：
-1. Windows 浏览器 `http://localhost:8000`
+1. Windows 浏览器 `http://localhost:18000`
 2. Windows TCP/IP 栈 → `netsh portproxy` 规则匹配
-3. 目标被改写为 `WSL2_IP:8000`
+3. 目标被改写为 `WSL2_IP:18000`
 4. 数据包进入 Hyper-V 虚拟交换机
 5. 到达 WSL2 `eth0`
-6. Docker 的 `-p 8000:8000` 规则匹配
+6. Docker 的 `-p 18000:18000` 规则匹配
 7. 数据包进入 `triad-bridge` 网络
 8. 送达容器内的服务进程
 

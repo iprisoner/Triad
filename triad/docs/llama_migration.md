@@ -284,14 +284,14 @@ llama-server \
 ```bash
 # 1. 核心服务启动 (无 LLM)
 docker compose up -d
-# 验证: openclaw(8080), hermes(8000/19000), qdrant(16333), registry(18500) 均 healthy
+# 验证: openclaw(18080), hermes(18000/19000), qdrant(16333), registry(18500) 均 healthy
 
 # 2. 本地 LLM 模式启动
 docker compose --profile local-llm up -d
 # 验证: llama-server 健康，且 nvidia-smi 显示 ~9GB 显存占用
 
 # 3. 模型对话测试
-curl http://localhost:8080/v1/chat/completions \
+curl http://localhost:18000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"qwen-14b-chat.Q4_K_M.gguf","messages":[{"role":"user","content":"你好"}]}'
 

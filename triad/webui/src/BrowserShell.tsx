@@ -57,7 +57,7 @@ function LobsterConsole() {
   } = useTaskStream();
 
   const { status: wsStatus, send } = useWebSocket({
-    url: 'ws://localhost:8080/ws/tasks',
+    url: 'ws://localhost:18080/ws/tasks',
     onMessage: appendStreamMessage,
   });
 
@@ -441,7 +441,7 @@ export function BrowserShell() {
           aria-hidden={activeTab !== 'comfyui'}
         >
           <iframe
-            src="http://localhost:8188"
+            src="http://localhost:18188"
             className="w-full h-full border-0"
             title="ComfyUI Canvas"
             allow="fullscreen"

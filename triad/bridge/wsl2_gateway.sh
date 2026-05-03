@@ -5,7 +5,7 @@ set -euo pipefail
 # WSL2 网关路由脚本 — 解决 Windows 宿主机访问 WSL2 内 Docker 服务
 # =============================================================================
 # 问题: WSL2 内的 Docker 容器运行在虚拟网卡后面，Windows 浏览器无法直接
-#       访问 localhost:8080（即使 Docker 做了 -p 8080:8080 映射）
+#       访问 localhost:18080（即使 Docker 做了 -p 18080:18080 映射）
 #
 # 方案: 1. 在 WSL2 侧将服务绑定到 0.0.0.0（Docker -p 已默认如此）
 #       2. 获取 WSL2 实例的 eth0 IP
@@ -50,7 +50,7 @@ show_help() {
 用法: ./wsl2_gateway.sh [命令] [选项]
 
 命令:
-  setup [端口...]  配置端口转发（默认: 8080 8000 16333 16379）
+  setup [端口...]  配置端口转发（默认: 18080 18000 16333 16379）
   status          查看当前 WSL2 IP、端口转发状态和防火墙规则
   clean [端口...]  清理端口转发规则（默认清理所有 Triad 端口）
   auto            自动检测 Triad Docker 容器并配置对应端口
@@ -63,7 +63,7 @@ show_help() {
 
 示例:
   ./wsl2_gateway.sh setup
-  ./wsl2_gateway.sh setup 8080 3000 9090
+  ./wsl2_gateway.sh setup 18080 3000 9090
   ./wsl2_gateway.sh auto
   ./wsl2_gateway.sh clean
   WSL2_AUTO_CLEAN=true ./wsl2_gateway.sh setup
@@ -211,12 +211,12 @@ setup_port_forward() {
     # 先删除可能存在的旧规则（避免冲突）
     $PS_CMD -NoProfile -Command "
         netsh interface portproxy delete v4tov4 listenport=${listen_port} listenaddress=0.0.0.0 2>&1 | Out-Null
-        netsh interface portproxy delete v4tov4 listenport=${listen_port} listenaddress=127.0.0.1 2>&1 | Out-Null
+        netsh interface portproxy delete v4tov4 listenport=${listen_port} listenaddress=0.0.0.0 2>&1 | Out-Null
     " 2>/dev/null || true
 
-    # 添加新规则（同时绑定 127.0.0.1 和 0.0.0.0）
+    # 添加新规则（同时绑定 0.0.0.0）
     ps_exec "
-        \$err1 = netsh interface portproxy add v4tov4 listenport=${listen_port} listenaddress=127.0.0.1 connectport=${connect_port} connectaddress=${wsl_ip} 2>&1
+        \$err1 = netsh interface portproxy add v4tov4 listenport=${listen_port} listenaddress=0.0.0.0 connectport=${connect_port} connectaddress=${wsl_ip} 2>&1
         if (\$err1 -match 'Access is denied|elevation') { exit 1 }
         Write-Output 'PortProxy-OK'
     " "netsh portproxy add ${listen_port}"
@@ -243,7 +243,7 @@ clean_port_forward() {
 
     # 删除 portproxy
     $PS_CMD -NoProfile -Command "
-        netsh interface portproxy delete v4tov4 listenport=${listen_port} listenaddress=127.0.0.1 2>&1 | Out-Null
+        netsh interface portproxy delete v4tov4 listenport=${listen_port} listenaddress=0.0.0.0 2>&1 | Out-Null
         netsh interface portproxy delete v4tov4 listenport=${listen_port} listenaddress=0.0.0.0 2>&1 | Out-Null
         Write-Output 'Deleted'
     " 2>/dev/null || true
@@ -430,8 +430,8 @@ show_diagnostics() {
 
     echo ""
     echo -e "${BOLD}端口监听状态（WSL2 侧）:${NC}"
-    ss -tlnp 2>/dev/null | grep -E 'State|8080|8000|16333|16379' | sed 's/^/  /' || \
-    netstat -tlnp 2>/dev/null | grep -E 'Proto|8080|8000|16333|16379' | sed 's/^/  /' || \
+    ss -tlnp 2>/dev/null | grep -E 'State|18080|18000|16333|16379' | sed 's/^/  /' || \
+    netstat -tlnp 2>/dev/null | grep -E 'Proto|18080|18000|16333|16379' | sed 's/^/  /' || \
     log_warn "ss/netstat 不可用"
 }
 
@@ -440,7 +440,7 @@ show_diagnostics() {
 # =============================================================================
 
 # --- 默认配置 ---
-readonly DEFAULT_PORTS=(8080 8000 16333 16379)
+readonly DEFAULT_PORTS=(18080 18000 16333 16379)
 TRIAD_PORTS=()
 
 # 从环境变量读取端口
@@ -495,8 +495,8 @@ case "$CMD" in
         echo -e "${BOLD}访问地址（Windows 浏览器）:${NC}"
         for port in "${TRIAD_PORTS[@]}"; do
             case "$port" in
-                8080) echo -e "  ClawPanel 前端:   ${CYAN}http://localhost:8080${NC}" ;;
-                8000) echo -e "  Triad API:        ${CYAN}http://localhost:8000${NC}" ;;
+                18080) echo -e "  ClawPanel 前端:   ${CYAN}http://localhost:18080${NC}" ;;
+                18000) echo -e "  Triad API:        ${CYAN}http://localhost:18000${NC}" ;;
                 16333) echo -e "  Qdrant VectorDB:  ${CYAN}http://localhost:16333${NC}" ;;
                 16379) echo -e "  Redis:            ${CYAN}redis://localhost:16379${NC}" ;;
                 *)    echo -e "  服务端口:         ${CYAN}http://localhost:${port}${NC}" ;;

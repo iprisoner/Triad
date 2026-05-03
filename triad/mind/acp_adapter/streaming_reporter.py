@@ -29,7 +29,7 @@ class StreamingReporter:
     失败时不影响 Hermes 主流程的执行进度。
     """
 
-    def __init__(self, gateway_url: str = "http://host.docker.internal:8080") -> None:
+    def __init__(self, gateway_url: str = "http://host.docker.internal:18080") -> None:
         """
         初始化 StreamingReporter。
 

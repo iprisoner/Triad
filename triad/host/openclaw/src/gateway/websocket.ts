@@ -159,7 +159,7 @@ export class TaskWebSocketGateway {
   /** 服务器端口 */
   private port: number;
 
-  constructor(port: number = 8080) {
+  constructor(port: number = 18080) {
     this.port = port;
 
     // ── Express HTTP 服务器 ──────────────────────────────────────────────
@@ -789,9 +789,9 @@ export class TaskWebSocketGateway {
 
   public start(): void {
     this.server.listen(this.port, () => {
-      console.log(`🟣 OpenClaw Task Gateway listening on ws://localhost:${this.port}${WS_PATH}`);
-      console.log(`🟣 Internal REST API on http://localhost:${this.port}/api/internal/*`);
-      console.log(`🟣 Health check at http://localhost:${this.port}/health`);
+      console.log(`🟣 OpenClaw Task Gateway listening on ws://0.0.0.0:${this.port}${WS_PATH}`);
+      console.log(`🟣 Internal REST API on http://0.0.0.0:${this.port}/api/internal/*`);
+      console.log(`🟣 Health check at http://0.0.0.0:${this.port}/health`);
       console.log(`🟣 Max connections: ${MAX_CONNECTIONS}, Heartbeat: ${HEARTBEAT_INTERVAL_MS}ms`);
     });
 
@@ -850,6 +850,6 @@ export class TaskWebSocketGateway {
 // ═══════════════════════════════════════════════════════════════════════════
 
 if (require.main === module) {
-  const gateway = new TaskWebSocketGateway(8080);
+  const gateway = new TaskWebSocketGateway(18080);
   gateway.start();
 }

@@ -29,7 +29,7 @@ class ConfigManager:
         # 2. 基础配置
         self._config = {
             "triad_root": os.getenv("TRIAD_ROOT", str(Path.home() / ".triad")),
-            "gateway_port": int(os.getenv("GATEWAY_PORT", "8080")),
+            "gateway_port": int(os.getenv("GATEWAY_PORT", "18080")),
             "llama_port": int(os.getenv("LLAMA_PORT", "18000")),
             "llama_model_path": os.getenv("LLAMA_MODEL_PATH", ""),
             "comfyui_host": os.getenv("COMFYUI_HOST", "host.docker.internal"),

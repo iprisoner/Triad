@@ -98,7 +98,7 @@ npm run dev
 
 ## WebSocket 协议
 
-前端默认连接 `ws://localhost:8080/ws/tasks`。
+前端默认连接 `ws://localhost:18080/ws/tasks`。
 
 ```typescript
 interface TaskStreamMessage {

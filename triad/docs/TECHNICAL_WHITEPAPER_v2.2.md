@@ -33,7 +33,7 @@
 │  ├─ 右侧: AgentCanvas (模型路由可视化) + VRAMPanel (显存条) + ConfigPanel (配置)  │
 │  │            └─ ProviderManager (动态模型注册)                                  │
 │  │            └─ SkillMarketTab (技能市场)                                      │
-│  └─ WebSocket: ws://localhost:8080/ws/tasks (实时双向通信)                      │
+│  └─ WebSocket: ws://localhost:18080/ws/tasks (实时双向通信)                      │
 │                                                                              │
 │  Tab 2: ComfyUI 画布 (iframe, display:none 切换, DOM 永不卸载)                  │
 │  └─ http://localhost:18188 (宿主机原生 Python venv)                             │
@@ -47,10 +47,10 @@
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           OpenClaw Gateway (Node.js)                           │
-│  ├─ websocket.ts    : WebSocket Server (ws://:8080/ws/tasks)                    │
+│  ├─ websocket.ts    : WebSocket Server (ws://:18080/ws/tasks)                    │
 │  ├─ api.ts          : REST API (/api/models 动态注册表 CRUD + toggle + test)   │
 │  ├─ monitor.ts      : 系统探针 (/api/system/status, nvidia-smi + docker ps)      │
-│  └─ 静态文件服务    : webui/dist/ → http://localhost:8080/panel               │
+│  └─ 静态文件服务    : webui/dist/ → http://localhost:18080/panel               │
 └──────────────────────────────────────────────────────────────────────────────┘
                                     │ ACP / HTTP
                                     ▼
@@ -69,7 +69,7 @@
                                     ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                           多模态执行层                                          │
-│  ├─ llama-server (Docker)   : -ngl 99/0 GPU/CPU 跷跷板 (:8000)                │
+│  ├─ llama-server (Docker)   : -ngl 99/0 GPU/CPU 跷跷板 (:18000)                │
 │  ├─ ComfyUI (宿主机 venv)   : SDXL + InstantID + SVD (:18188)                   │
 │  ├─ comfyui_mcp_bridge.py   : API JSON 参数注入 + WebSocket 轮询               │
 │  ├─ vram_scheduler_llama.py : 显存状态机 (IDLE→CPU_FALLBACK→RENDERING)          │
@@ -453,7 +453,7 @@ _get_multimodal_strategy(task_type, user_prompt, role, generated_text)
 
 | 模块 | 文件 | 行数 | 完成度 | 说明 |
 |------|------|------|--------|------|
-| WebSocket Server | `websocket.ts` | 727 | 90% | ws://:8080/ws/tasks，连接管理 |
+| WebSocket Server | `websocket.ts` | 727 | 90% | ws://:18080/ws/tasks，连接管理 |
 | 动态模型 API | `api.ts` | 337 | 90% | /api/models CRUD + test |
 | **系统探针** | `monitor.ts` | **282** | **90%** | **/api/system/status，nvidia-smi + docker** |
 
@@ -486,7 +486,7 @@ _get_multimodal_strategy(task_type, user_prompt, role, generated_text)
 ### 6.1 前端 → Gateway WebSocket
 
 ```
-ws://localhost:8080/ws/tasks
+ws://localhost:18080/ws/tasks
 
 // 发送
 {"action":"submit_task","prompt":"@novelist 写第一章","strategy":"CREATIVE"}

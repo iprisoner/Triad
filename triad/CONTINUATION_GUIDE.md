@@ -34,7 +34,7 @@ webui/src/types/index.ts                             — TypeScript 类型定义
 
 ### OpenClaw Gateway (Node.js/TypeScript)
 ```
-host/openclaw/src/gateway/websocket.ts               — WebSocket Server (:8080)
+host/openclaw/src/gateway/websocket.ts               — WebSocket Server (:18080)
 host/openclaw/src/gateway/api.ts                     — REST API (/api/models CRUD)
 host/openclaw/src/gateway/monitor.ts                 — 系统探针 (/api/system/status)
 ```
