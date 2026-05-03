@@ -590,7 +590,8 @@ install_llama_cpp() {
                 if apt-get install -y gcc-10 g++-10; then
                     export CC=gcc-10
                     export CXX=g++-10
-                    ok "已切换至 GCC 10 进行 CUDA 编译 (CC=$CC, CXX=$CXX)"
+                    export CUDAHOSTCXX=/usr/bin/g++-10
+                    ok "已切换至 GCC 10 进行 CUDA 编译 (CC=$CC, CXX=$CXX, CUDAHOSTCXX=$CUDAHOSTCXX)"
                 else
                     warn "GCC 10 安装失败，继续使用系统默认 GCC ${gcc_major}，编译可能失败"
                 fi
@@ -606,6 +607,10 @@ install_llama_cpp() {
 
     info "运行 CMake 配置（启用 CUDA） ..."
     # 针对 2080Ti (Turing, SM75) 优化
+    local cmake_cuda_host=""
+    if [[ -n "${CUDAHOSTCXX}" ]]; then
+        cmake_cuda_host="-DCMAKE_CUDA_HOST_COMPILER=${CUDAHOSTCXX}"
+    fi
     cmake -B build \
         -DGGML_CUDA=ON \
         -DGGML_CUDA_F16=ON \
@@ -615,6 +620,7 @@ install_llama_cpp() {
         -DLLAMA_BUILD_SERVER=ON \
         -DLLAMA_BUILD_EXAMPLES=OFF \
         -DLLAMA_BUILD_TESTS=OFF \
+        ${cmake_cuda_host} \
         . || fatal "CMake 配置失败"
 
     info "开始编译 llama.cpp（使用 $(nproc) 线程） ..."
