@@ -608,8 +608,10 @@ install_llama_cpp() {
     info "运行 CMake 配置（启用 CUDA） ..."
     # 针对 2080Ti (Turing, SM75) 优化
     local cmake_cuda_host=""
+    local cmake_cuda_flags=""
     if [[ -n "${CUDAHOSTCXX}" ]]; then
         cmake_cuda_host="-DCMAKE_CUDA_HOST_COMPILER=${CUDAHOSTCXX}"
+        cmake_cuda_flags="-DCMAKE_CUDA_FLAGS=-ccbin /usr/bin/g++-10"
     fi
     cmake -B build \
         -DGGML_CUDA=ON \
@@ -621,6 +623,7 @@ install_llama_cpp() {
         -DLLAMA_BUILD_EXAMPLES=OFF \
         -DLLAMA_BUILD_TESTS=OFF \
         ${cmake_cuda_host} \
+        ${cmake_cuda_flags} \
         . || fatal "CMake 配置失败"
 
     info "开始编译 llama.cpp（使用 $(nproc) 线程） ..."
