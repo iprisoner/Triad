@@ -31,10 +31,10 @@ readonly EMBEDDING_API_PORT=19000
 readonly MCP_SERVER_PORT=18500
 readonly BIND_ADDRESS="0.0.0.0"
 
-# 模型配置
-readonly MODEL_NAME="Qwen-14B-Chat"
-readonly MODEL_GGUF_URL="https://hf-mirror.com/Qwen/Qwen-14B-Chat-GGUF/resolve/main/qwen-14b-chat-q4_k_m.gguf"
-readonly MODEL_GGUF_FILENAME="qwen-14b-chat-q4_k_m.gguf"
+# 模型配置（用户自行管理模型文件，不在脚本中硬编码路径）
+readonly MODEL_NAME="Qwen3.6-27B"
+# 启动 llama-server 时请使用 -m 参数指定你的模型路径
+# 例如：llama-server -m /mnt/f/AI_Models/Qwen3.6-27b.gguf --host 0.0.0.0 --port 18000 -ngl 999 ...
 readonly LLAMA_CPP_REPO="https://ghproxy.com/https://github.com/ggerganov/llama.cpp.git"
 
 # 国内镜像源配置
@@ -686,9 +686,10 @@ QDRANT_GRPC_PORT=${QDRANT_GRPC_PORT}
 EMBEDDING_API_PORT=${EMBEDDING_API_PORT}
 MCP_SERVER_PORT=${MCP_SERVER_PORT}
 
-# 模型配置
+# 模型配置（由用户自行管理，启动时通过 -m 参数指定）
 MODEL_NAME=${MODEL_NAME}
-MODEL_PATH=$(get_data_path "models")/${MODEL_GGUF_FILENAME}
+# MODEL_PATH: 请替换为你的实际模型路径
+# 示例: MODEL_PATH=/mnt/f/AI_Models/Qwen3.6-27b.gguf
 LLAMA_CPP_ROOT=${TRIAD_ROOT}/llama.cpp
 
 # 数据盘路径
@@ -756,11 +757,11 @@ post_install_test() {
     fi
 
     local model_path
-    model_path=$(get_data_path "models")/${MODEL_GGUF_FILENAME}
-    if [[ -f "${model_path}" ]]; then
-        ok "模型文件: 已下载"
+    model_path=$(get_data_path "models")/*.gguf
+    if compgen -G "${model_path}" >/dev/null 2>&1; then
+        ok "模型文件: 检测到 GGUF 文件"
     else
-        warn "模型文件: 未找到 (${model_path})"
+        warn "模型文件: 数据盘未找到 .gguf 文件（用户自行管理模型路径）"
     fi
 
     if [[ -f "${ENV_FILE}" ]]; then
@@ -857,33 +858,13 @@ cmd_start() {
     info "正在启动服务 ..."
     line
 
-    # 1. 启动 llama-server (systemd)
-    info "启动 llama-server (端口: ${LLAMA_PORT}) ..."
-    if sudo systemctl start llama-server 2>/dev/null; then
-        ok "llama-server 已启动"
+        # 1. 检测 llama-server（用户自行管理，脚本不自动启动）
+    info "检测 llama-server (端口: ${LLAMA_PORT}) ..."
+    if curl -s --max-time 2 "http://localhost:${LLAMA_PORT}/health" >/dev/null 2>&1; then
+        ok "llama-server 已在端口 ${LLAMA_PORT} 运行"
     else
-        warn "llama-server systemd 启动失败，尝试手动启动 ..."
-        local model_dir
-        model_dir=$(get_data_path "models")
-        local model_path="${model_dir}/${MODEL_GGUF_FILENAME}"
-        local server_bin="${TRIAD_ROOT}/llama.cpp/build/bin/llama-server"
-        [[ ! -f "${server_bin}" ]] && server_bin="${TRIAD_ROOT}/llama.cpp/build/llama-server"
-        if [[ -f "${server_bin}" ]] && [[ -f "${model_path}" ]]; then
-            nohup "${server_bin}" \
-                --model "${model_path}" \
-                --host "${BIND_ADDRESS}" \
-                --port "${LLAMA_PORT}" \
-                --ctx-size 8192 \
-                --n-gpu-layers 99 \
-                --batch-size 512 \
-                --timeout 300 \
-                --chat-template chatml \
-                >> "${LOG_DIR}/llama-server.log" 2>&1 &
-            sleep 2
-            ok "llama-server 手动启动完成 (PID: $!)"
-        else
-            err "llama-server 启动失败：缺少二进制文件或模型"
-        fi
+        warn "llama-server 未在端口 ${LLAMA_PORT} 运行"
+        info "请手动启动: nohup llama-server -m <你的模型路径> --host 0.0.0.0 --port ${LLAMA_PORT} -ngl 999 ..."
     fi
 
     # 2. 启动 Qdrant (Docker)
@@ -1158,11 +1139,7 @@ cmd_update() {
         pushd "${llama_dir}" >/dev/null || true
         git fetch origin
         git pull --ff-only || warn "llama.cpp 更新失败"
-        info "重新编译 llama.cpp ..."
-        rm -rf build
-        cmake -B build -DLLAMA_CUDA=ON -DLLAMA_CUDA_F16=ON -DCMAKE_CUDA_ARCHITECTURES="75" -DLLAMA_BUILD_SERVER=ON -DCMAKE_BUILD_TYPE=Release .
-        make -C build -j"$(nproc)" || warn "llama.cpp 编译失败"
-        sudo systemctl restart llama-server 2>/dev/null || warn "llama-server 重启失败"
+        warn "llama.cpp 源码已更新，请自行重新编译（脚本不再自动编译）"
         popd >/dev/null || true
     fi
 
