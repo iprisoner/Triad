@@ -1,3 +1,7 @@
+> ⚠️ **文档过时声明**：本文档描述的是 Triad v2.0-v2.2 的架构设计。v2.3 版本已移除 ComfyUI（多模态生成）和 Claude Code Daemon（代码执行代理），核心架构精简为 OpenClaw Gateway + Hermes 编排层 + llama.cpp 本地推理。当前架构请参考 [ARCHITECTURE_v2.3.md](./ARCHITECTURE_v2.3.md)。
+>
+> 最后更新：2026-05-06
+
 # Triad 融合系统设计文档 v2.0
 ## 多模态 · 多模型动态路由 · 全链路内容生成工作站
 
