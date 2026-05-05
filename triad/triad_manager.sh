@@ -478,13 +478,22 @@ install_python_env() {
         python3.10 -m venv "${venv_dir}"
     fi
 
-    # 安装项目依赖
+    # 安装项目根目录依赖
     local req_file="${TRIAD_ROOT}/requirements.txt"
     if [[ -f "${req_file}" ]]; then
-        info "安装 requirements.txt 依赖 ..."
+        info "安装根目录 requirements.txt 依赖 ..."
         "${venv_dir}/bin/pip" install -r "${req_file}" --index-url "${PIP_INDEX_URL}" || warn "部分 requirements 安装失败"
     else
-        warn "未找到 requirements.txt，跳过项目依赖安装"
+        warn "未找到根目录 requirements.txt，跳过"
+    fi
+
+    # 安装 Hermes (mind/) Python 依赖
+    local hermes_req="${TRIAD_ROOT}/mind/requirements.txt"
+    if [[ -f "${hermes_req}" ]]; then
+        info "安装 Hermes (mind/) Python 依赖 ..."
+        "${venv_dir}/bin/pip" install -r "${hermes_req}" --index-url "${PIP_INDEX_URL}" || warn "Hermes 部分依赖安装失败"
+    else
+        warn "未找到 Hermes requirements.txt，跳过"
     fi
 
     ok "Python 3.10 环境配置完成"
@@ -532,12 +541,35 @@ install_node_env() {
     # 安装项目 npm 依赖
     local pkg_file="${TRIAD_ROOT}/package.json"
     if [[ -f "${pkg_file}" ]]; then
-        info "安装项目 npm 依赖 ..."
+        info "安装项目根目录 npm 依赖 ..."
         pushd "${TRIAD_ROOT}" >/dev/null || fatal "无法进入项目目录"
         npm install --registry="${NPM_REGISTRY}" || warn "npm install 部分失败"
         popd >/dev/null || true
     else
-        warn "未找到 package.json，跳过 npm 依赖安装"
+        warn "未找到根目录 package.json，跳过"
+    fi
+
+    # 安装 OpenClaw Gateway npm 依赖
+    local openclaw_dir="${TRIAD_ROOT}/host/openclaw"
+    if [[ -f "${openclaw_dir}/package.json" ]]; then
+        info "安装 OpenClaw Gateway npm 依赖 ..."
+        pushd "${openclaw_dir}" >/dev/null || true
+        npm install --registry="${NPM_REGISTRY}" || warn "OpenClaw npm install 部分失败"
+        npm run build 2>/dev/null || warn "OpenClaw build 失败"
+        popd >/dev/null || true
+    else
+        warn "未找到 OpenClaw package.json，跳过"
+    fi
+
+    # 安装 WebUI npm 依赖
+    local webui_dir="${TRIAD_ROOT}/webui"
+    if [[ -f "${webui_dir}/package.json" ]]; then
+        info "安装 WebUI npm 依赖 ..."
+        pushd "${webui_dir}" >/dev/null || true
+        npm install --registry="${NPM_REGISTRY}" || warn "WebUI npm install 部分失败"
+        popd >/dev/null || true
+    else
+        warn "未找到 WebUI package.json，跳过"
     fi
 
     ok "Node.js 18 环境配置完成"
@@ -678,7 +710,7 @@ EOF
 # Web UI 构建
 build_web_ui() {
     step "9" "构建 Web UI"
-    local web_dir="${TRIAD_ROOT}/web"
+    local web_dir="${TRIAD_ROOT}/webui"
     if [[ ! -d "${web_dir}" ]]; then
         warn "未找到 web 目录 ${web_dir}，跳过 Web UI 构建"
         return 0
@@ -875,9 +907,9 @@ cmd_start() {
     fi
 
 
-    # 3. 启动 OpenClaw
-    info "启动 OpenClaw (端口: ${OPENCLAW_PORT}) ..."
-    local openclaw_dir="${TRIAD_ROOT}/openclaw"
+    # 3. 启动 OpenClaw Gateway
+    info "启动 OpenClaw Gateway (端口: ${OPENCLAW_PORT}) ..."
+    local openclaw_dir="${TRIAD_ROOT}/host/openclaw"
     if [[ -d "${openclaw_dir}" ]] && [[ -f "${openclaw_dir}/package.json" ]]; then
         pushd "${openclaw_dir}" >/dev/null || true
         if [[ -f .env ]]; then
@@ -887,22 +919,27 @@ cmd_start() {
         popd >/dev/null || true
         ok "OpenClaw 已启动 (PID: $!)"
     else
-        warn "未找到 OpenClaw 目录，跳过启动"
+        warn "未找到 OpenClaw Gateway 目录 (${openclaw_dir})，跳过启动"
     fi
 
-    # 4. 启动 Hermes (如果有)
+    # 4. 启动 Hermes 编排层
     info "启动 Hermes (端口: ${HERMES_PORT}) ..."
-    local hermes_dir="${TRIAD_ROOT}/hermes"
-    if [[ -d "${hermes_dir}" ]] && [[ -f "${hermes_dir}/package.json" ]]; then
+    local hermes_dir="${TRIAD_ROOT}/mind"
+    local venv_dir="${TRIAD_ROOT}/venv"
+    if [[ -d "${hermes_dir}" ]] && [[ -f "${hermes_dir}/hermes_orchestrator.py" ]]; then
         pushd "${hermes_dir}" >/dev/null || true
         if [[ -f .env ]]; then
             export $(grep -v '^#' .env | xargs) 2>/dev/null || true
         fi
-        nohup npm start >> "${LOG_DIR}/hermes.log" 2>&1 &
+        if [[ -f "${venv_dir}/bin/python" ]]; then
+            nohup "${venv_dir}/bin/python" hermes_orchestrator.py >> "${LOG_DIR}/hermes.log" 2>&1 &
+        else
+            nohup python3 hermes_orchestrator.py >> "${LOG_DIR}/hermes.log" 2>&1 &
+        fi
         popd >/dev/null || true
         ok "Hermes 已启动 (PID: $!)"
     else
-        warn "未找到 Hermes 目录，跳过启动"
+        warn "未找到 Hermes 目录 (${hermes_dir})，跳过启动"
     fi
 
     # 5. 启动 MCP Server (如果有)
@@ -955,8 +992,20 @@ cmd_stop() {
     info "正在停止服务 ..."
     line
 
-    # 停止 systemd 服务
-    sudo systemctl stop llama-server 2>/dev/null && ok "llama-server 已停止" || warn "llama-server 未运行或停止失败"
+    # 停止 llama-server 进程（手动启动模式，无 systemd）
+    local llama_pids
+    llama_pids=$(pgrep -f "llama-server" 2>/dev/null || true)
+    if [[ -n "${llama_pids}" ]]; then
+        echo "${llama_pids}" | xargs kill -TERM 2>/dev/null || true
+        sleep 1
+        llama_pids=$(pgrep -f "llama-server" 2>/dev/null || true)
+        if [[ -n "${llama_pids}" ]]; then
+            echo "${llama_pids}" | xargs kill -KILL 2>/dev/null || true
+        fi
+        ok "llama-server 已停止"
+    else
+        warn "llama-server 未运行"
+    fi
 
     # 停止 Docker 容器
     sudo docker stop triad-qdrant 2>/dev/null && ok "Qdrant 容器已停止" || warn "Qdrant 容器未运行"
