@@ -25,7 +25,6 @@ readonly USE_DATA_DISK=1
 readonly OPENCLAW_PORT=18080
 readonly HERMES_PORT=18000
 readonly LLAMA_PORT=18000
-readonly COMFYUI_PORT=18188
 readonly QDRANT_HTTP_PORT=16333
 readonly QDRANT_GRPC_PORT=16334
 readonly EMBEDDING_API_PORT=19000
@@ -755,95 +754,10 @@ download_model() {
     fi
 }
 
-# ComfyUI venv 配置
-install_comfyui_env() {
-    step "8" "配置 ComfyUI Python 虚拟环境"
-    local comfy_dir
-    comfy_dir=$(get_data_path "comfyui")
-    check_or_mkdir "${comfy_dir}"
-    local comfy_venv="${comfy_dir}/venv"
-
-    # 如果 ComfyUI 目录不存在，克隆仓库
-    if [[ ! -d "${comfy_dir}/ComfyUI" ]]; then
-        info "克隆 ComfyUI 仓库 ..."
-        git clone --depth 1 https://ghproxy.com/https://github.com/comfyanonymous/ComfyUI.git "${comfy_dir}/ComfyUI" || \
-            git clone --depth 1 https://github.com/comfyanonymous/ComfyUI.git "${comfy_dir}/ComfyUI" || \
-            warn "ComfyUI 克隆失败"
-    else
-        info "ComfyUI 已存在，尝试更新 ..."
-        pushd "${comfy_dir}/ComfyUI" >/dev/null || true
-        git pull --ff-only || warn "ComfyUI 更新失败"
-        popd >/dev/null || true
-    fi
-
-    # 创建 ComfyUI 专用虚拟环境
-    if [[ ! -d "${comfy_venv}" ]]; then
-        info "创建 ComfyUI 虚拟环境 ..."
-        python3.10 -m venv "${comfy_venv}"
-    fi
-
-    # 安装 ComfyUI 依赖
-    local comfy_req="${comfy_dir}/ComfyUI/requirements.txt"
-    if [[ -f "${comfy_req}" ]]; then
-        info "安装 ComfyUI 依赖 ..."
-        "${comfy_venv}/bin/pip" install -r "${comfy_req}" --index-url "${PIP_INDEX_URL}" || warn "部分 ComfyUI 依赖安装失败"
-    fi
-
-    # 安装 torch  nightly/cu118 版本（2080Ti 支持 CUDA 11.8 / 12.1）
-    info "安装 PyTorch (CUDA 11.8) ..."
-    "${comfy_venv}/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 || \
-        warn "PyTorch CUDA 11.8 安装失败，尝试默认版本" && \
-        "${comfy_venv}/bin/pip" install torch torchvision torchaudio
-
-    # 安装 xformers 加速（可选）
-    info "尝试安装 xformers ..."
-    "${comfy_venv}/bin/pip" install xformers || warn "xformers 安装失败（非必需）"
-
-    # 创建 ComfyUI 启动脚本
-    local comfy_launch="${comfy_dir}/launch.sh"
-    cat > "${comfy_launch}" <<EOF
-#!/bin/bash
-# ComfyUI 启动脚本（由 triad_manager.sh 自动生成）
-export PATH="/usr/local/cuda/bin:\${PATH}"
-export LD_LIBRARY_PATH="/usr/local/cuda/lib64:\${LD_LIBRARY_PATH}"
-cd "${comfy_dir}/ComfyUI"
-source "${comfy_venv}/bin/activate"
-python main.py --listen ${BIND_ADDRESS} --port ${COMFYUI_PORT} \$@
-EOF
-    chmod +x "${comfy_launch}"
-
-    # 创建 systemd 服务
-    local service_file="/etc/systemd/system/comfyui.service"
-    sudo tee "${service_file}" >/dev/null <<EOF
-[Unit]
-Description=ComfyUI Server (Triad)
-After=network.target
-
-[Service]
-Type=simple
-User=${USER}
-WorkingDirectory=${comfy_dir}/ComfyUI
-Environment="PATH=${comfy_venv}/bin:/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="LD_LIBRARY_PATH=/usr/local/cuda/lib64"
-Environment="CUDA_VISIBLE_DEVICES=0"
-ExecStart=${comfy_venv}/bin/python main.py --listen ${BIND_ADDRESS} --port ${COMFYUI_PORT}
-Restart=on-failure
-RestartSec=10
-StandardOutput=append:${LOG_DIR}/comfyui.log
-StandardError=append:${LOG_DIR}/comfyui.log
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    run_cmd "重新加载 systemd 配置（ComfyUI）" sudo systemctl daemon-reload
-    run_cmd "启用 ComfyUI 开机自启" sudo systemctl enable comfyui
-    ok "ComfyUI 环境配置完成"
-}
 
 # Qdrant 向量数据库配置（Docker 容器）
 install_qdrant() {
-    step "9" "部署 Qdrant 向量数据库（Docker）"
+    step "8" "部署 Qdrant 向量数据库（Docker）"
     local qdrant_dir
     qdrant_dir=$(get_data_path "qdrant")
     check_or_mkdir "${qdrant_dir}"
@@ -874,7 +788,7 @@ EOF
 
 # .env 环境文件生成
 generate_env_file() {
-    step "10" "生成 .env 环境配置文件"
+    step "9" "生成 .env 环境配置文件"
     info "写入端口配置到 ${ENV_FILE} ..."
     cat > "${ENV_FILE}" <<EOF
 # Triad 环境配置文件（由 triad_manager.sh 自动生成）
@@ -887,7 +801,6 @@ BIND_ADDRESS=${BIND_ADDRESS}
 OPENCLAW_PORT=${OPENCLAW_PORT}
 HERMES_PORT=${HERMES_PORT}
 LLAMA_PORT=${LLAMA_PORT}
-COMFYUI_PORT=${COMFYUI_PORT}
 QDRANT_HTTP_PORT=${QDRANT_HTTP_PORT}
 QDRANT_GRPC_PORT=${QDRANT_GRPC_PORT}
 EMBEDDING_API_PORT=${EMBEDDING_API_PORT}
@@ -900,7 +813,6 @@ LLAMA_CPP_ROOT=${TRIAD_ROOT}/llama.cpp
 
 # 数据盘路径
 DATA_DISK=${DATA_DISK}
-COMFYUI_ROOT=$(get_data_path "comfyui")/ComfyUI
 QDRANT_STORAGE=$(get_data_path "qdrant")/storage
 
 # GPU 配置
@@ -917,7 +829,7 @@ EOF
 
 # Web UI 构建
 build_web_ui() {
-    step "11" "构建 Web UI"
+    step "10" "构建 Web UI"
     local web_dir="${TRIAD_ROOT}/web"
     if [[ ! -d "${web_dir}" ]]; then
         warn "未找到 web 目录 ${web_dir}，跳过 Web UI 构建"
@@ -934,7 +846,7 @@ build_web_ui() {
 
 # 安装后测试验证
 post_install_test() {
-    step "12" "安装后测试验证"
+    step "11" "安装后测试验证"
     # 检查各组件是否存在
     info "验证关键组件 ..."
     local errors=0
@@ -1019,19 +931,17 @@ cmd_install() {
     # 步骤 7: 模型下载
     download_model
 
-    # 步骤 8: ComfyUI 环境
-    install_comfyui_env
 
-    # 步骤 9: Qdrant 配置
+    # 步骤 8: Qdrant 配置
     install_qdrant
 
-    # 步骤 10: .env 生成
+    # 步骤 9: .env 生成
     generate_env_file
 
-    # 步骤 11: Web UI 构建
+    # 步骤 10: Web UI 构建
     build_web_ui
 
-    # 步骤 12: 测试验证
+    # 步骤 11: 测试验证
     post_install_test
 
     line
@@ -1120,29 +1030,8 @@ cmd_start() {
         err "Qdrant 容器启动失败"
     fi
 
-    # 3. 启动 ComfyUI (systemd 或手动)
-    info "启动 ComfyUI (端口: ${COMFYUI_PORT}) ..."
-    if sudo systemctl start comfyui 2>/dev/null; then
-        ok "ComfyUI 已启动"
-    else
-        warn "ComfyUI systemd 启动失败，尝试手动启动 ..."
-        local comfy_dir
-        comfy_dir=$(get_data_path "comfyui")
-        local comfy_venv="${comfy_dir}/venv"
-        if [[ -f "${comfy_venv}/bin/python" ]] && [[ -d "${comfy_dir}/ComfyUI" ]]; then
-            cd "${comfy_dir}/ComfyUI" || true
-            nohup "${comfy_venv}/bin/python" main.py \
-                --listen "${BIND_ADDRESS}" \
-                --port "${COMFYUI_PORT}" \
-                >> "${LOG_DIR}/comfyui.log" 2>&1 &
-            sleep 2
-            ok "ComfyUI 手动启动完成 (PID: $!)"
-        else
-            err "ComfyUI 启动失败：缺少虚拟环境或代码"
-        fi
-    fi
 
-    # 4. 启动 OpenClaw (Node.js 服务，如果有)
+    # 3. 启动 OpenClaw
     info "启动 OpenClaw (端口: ${OPENCLAW_PORT}) ..."
     local openclaw_dir="${TRIAD_ROOT}/openclaw"
     if [[ -d "${openclaw_dir}" ]] && [[ -f "${openclaw_dir}/package.json" ]]; then
@@ -1157,7 +1046,7 @@ cmd_start() {
         warn "未找到 OpenClaw 目录，跳过启动"
     fi
 
-    # 5. 启动 Hermes (如果有)
+    # 4. 启动 Hermes (如果有)
     info "启动 Hermes (端口: ${HERMES_PORT}) ..."
     local hermes_dir="${TRIAD_ROOT}/hermes"
     if [[ -d "${hermes_dir}" ]] && [[ -f "${hermes_dir}/package.json" ]]; then
@@ -1172,7 +1061,7 @@ cmd_start() {
         warn "未找到 Hermes 目录，跳过启动"
     fi
 
-    # 6. 启动 MCP Server (如果有)
+    # 5. 启动 MCP Server (如果有)
     info "启动 MCP Server (端口: ${MCP_SERVER_PORT}) ..."
     local mcp_dir="${TRIAD_ROOT}/mcp-server"
     if [[ -d "${mcp_dir}" ]]; then
@@ -1193,7 +1082,7 @@ cmd_start() {
         warn "未找到 MCP Server 目录，跳过启动"
     fi
 
-    # 7. 启动 Embedding API (如果有)
+    # 6. 启动 Embedding API (如果有)
     info "启动 Embedding API (端口: ${EMBEDDING_API_PORT}) ..."
     local emb_dir="${TRIAD_ROOT}/embedding-api"
     if [[ -d "${emb_dir}" ]] && [[ -f "${TRIAD_ROOT}/venv/bin/python" ]]; then
@@ -1224,7 +1113,6 @@ cmd_stop() {
 
     # 停止 systemd 服务
     sudo systemctl stop llama-server 2>/dev/null && ok "llama-server 已停止" || warn "llama-server 未运行或停止失败"
-    sudo systemctl stop comfyui 2>/dev/null && ok "ComfyUI 已停止" || warn "ComfyUI 未运行或停止失败"
 
     # 停止 Docker 容器
     sudo docker stop triad-qdrant 2>/dev/null && ok "Qdrant 容器已停止" || warn "Qdrant 容器未运行"
@@ -1259,12 +1147,6 @@ cmd_stop() {
         fi
     fi
 
-    # 清理 ComfyUI 残留
-    local comfy_pids
-    comfy_pids=$(pgrep -f "ComfyUI.*--port.*${COMFYUI_PORT}" 2>/dev/null || true)
-    if [[ -n "${comfy_pids}" ]]; then
-        echo "${comfy_pids}" | xargs kill -TERM 2>/dev/null || true
-    fi
 
     line
     ok "全部服务停止指令已发送"
@@ -1282,7 +1164,6 @@ cmd_status() {
 
     local services=(
         "llama-server:${LLAMA_PORT}"
-        "comfyui:${COMFYUI_PORT}"
         "openclaw:${OPENCLAW_PORT}"
         "hermes:${HERMES_PORT}"
         "qdrant-http:${QDRANT_HTTP_PORT}"
@@ -1312,7 +1193,7 @@ cmd_status() {
     line
 
     info "systemd 服务状态:"
-    for svc in llama-server comfyui; do
+    for svc in llama-server; do
         local sys_status
         sys_status=$(sudo systemctl is-active "${svc}" 2>/dev/null || echo "unknown")
         if [[ "${sys_status}" == "active" ]]; then
@@ -1392,19 +1273,11 @@ cmd_update() {
         popd >/dev/null || true
     fi
 
-    info "3. 更新 ComfyUI ..."
-    local comfy_dir
-    comfy_dir=$(get_data_path "comfyui")
-    if [[ -d "${comfy_dir}/ComfyUI/.git" ]]; then
-        pushd "${comfy_dir}/ComfyUI" >/dev/null || true
-        git pull --ff-only || warn "ComfyUI 更新失败"
-        popd >/dev/null || true
-    fi
 
-    info "4. 更新 Docker 镜像 ..."
+    info "3. 更新 Docker 镜像 ..."
     sudo docker pull qdrant/qdrant:latest 2>/dev/null || warn "Qdrant 镜像更新失败"
 
-    info "5. 重新构建 Web UI ..."
+    info "4. 重新构建 Web UI ..."
     build_web_ui
 
     line
@@ -1439,16 +1312,14 @@ ${C_BOLD}install 流程:${C_RESET}
     5. 安装 Node.js 18 + npm 依赖
     6. 编译安装 llama.cpp（CUDA 支持，Turing SM75）
     7. 下载 Qwen-14B Q4_K_M GGUF 模型到数据盘
-    8. 配置 ComfyUI venv
-    9. 生成 .env 文件（大端口 + 0.0.0.0）
-    10. 构建 Web UI
-    11. 安装后测试验证
+    8. 生成 .env 文件（大端口 + 0.0.0.0）
+    9. 构建 Web UI
+    10. 安装后测试验证
 
 ${C_BOLD}端口配置（大端口号 +10000）:${C_RESET}
     llama-server:      ${LLAMA_PORT}
     OpenClaw:           ${OPENCLAW_PORT}
     Hermes:             ${HERMES_PORT}
-    ComfyUI:            ${COMFYUI_PORT}
     Qdrant HTTP:        ${QDRANT_HTTP_PORT}
     Qdrant gRPC:        ${QDRANT_GRPC_PORT}
     Embedding API:      ${EMBEDDING_API_PORT}
@@ -1469,7 +1340,6 @@ ${C_BOLD}示例:${C_RESET}
 
 ${C_BOLD}数据盘路径:${C_RESET}
     模型文件:  $(get_data_path "models")
-    ComfyUI:   $(get_data_path "comfyui")
     Qdrant:    $(get_data_path "qdrant")
     日志目录:  ${LOG_DIR}
 
