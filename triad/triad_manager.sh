@@ -544,220 +544,68 @@ install_node_env() {
 }
 
 # llama.cpp 源码编译与 systemd 服务安装
-install_llama_cpp() {
-    step "6" "编译安装 llama.cpp（宿主机原生编译，CUDA 支持）"
-    local llama_dir="${TRIAD_ROOT}/llama.cpp"
-    local llama_bin_dir="${llama_dir}/build/bin"
-    local model_dir
-    model_dir=$(get_data_path "models")
-    check_or_mkdir "${model_dir}"
+check_llama_cpp() {
+    step "6" "检测 llama.cpp 状态"
 
-    # 克隆或更新 llama.cpp 源码
-    if [[ ! -d "${llama_dir}/.git" ]]; then
-        info "克隆 llama.cpp 源码到 ${llama_dir} ..."
-        rm -rf "${llama_dir}" || true
-        run_cmd "克隆 llama.cpp 仓库" git clone --depth 1 "${LLAMA_CPP_REPO}" "${llama_dir}"
-    else
-        info "更新 llama.cpp 源码 ..."
-        pushd "${llama_dir}" >/dev/null || fatal "无法进入 llama.cpp 目录"
-        git pull --ff-only || warn "llama.cpp git pull 失败，继续使用当前版本"
-        popd >/dev/null || true
-    fi
+    local llama_server_path=""
+    local llama_paths=(
+        "${TRIAD_ROOT}/llama.cpp/build/bin/llama-server"
+        "${TRIAD_ROOT}/llama.cpp/build/llama-server"
+        "${HOME}/llama.cpp/build/bin/llama-server"
+        "${HOME}/llama.cpp/build/llama-server"
+        "/usr/local/bin/llama-server"
+    )
 
-    # 检查 CUDA 环境
-    info "检查 CUDA 编译环境 ..."
-    if ! command -v nvcc &>/dev/null; then
-        warn "未找到 nvcc，尝试安装 cuda-toolkit ..."
-        sudo apt-get install -y nvidia-cuda-toolkit || warn "cuda-toolkit 安装失败，将尝试仅使用 CMAKE_CUDA_ARCHITECTURES"
-    fi
-    if [[ -d /usr/local/cuda ]]; then
-        export PATH="/usr/local/cuda/bin:${PATH}"
-        export LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
-        ok "CUDA 路径已配置"
-    fi
-
-    # 检查 CUDA/GCC 兼容性（CUDA 11.x 最高支持 GCC 10）
-    if command -v nvcc &>/dev/null && command -v gcc &>/dev/null; then
-        local cuda_version cuda_major gcc_major
-        cuda_version=$(nvcc --version | grep "release" | sed -n 's/.*release \([0-9]\+\)\.\([0-9]\+\).*/\1.\2/p')
-        gcc_major=$(gcc -dumpversion | cut -d. -f1)
-        if [[ -n "$cuda_version" && -n "$gcc_major" ]]; then
-            cuda_major=$(echo "$cuda_version" | cut -d. -f1)
-            if [[ "$cuda_major" -lt 12 && "$gcc_major" -ge 11 ]]; then
-                warn "检测到 CUDA ${cuda_version} + GCC ${gcc_major}，存在已知兼容性问题（CUDA 11.x 最高支持 GCC 10）"
-                info "正在安装 GCC 10 作为替代编译器..."
-                if apt-get install -y gcc-10 g++-10; then
-                    export CC=gcc-10
-                    export CXX=g++-10
-                    export CUDAHOSTCXX=/usr/bin/g++-10
-                    ok "已切换至 GCC 10 进行 CUDA 编译 (CC=$CC, CXX=$CXX, CUDAHOSTCXX=$CUDAHOSTCXX)"
-                else
-                    warn "GCC 10 安装失败，继续使用系统默认 GCC ${gcc_major}，编译可能失败"
-                fi
-            fi
+    for p in "${llama_paths[@]}"; do
+        if [[ -f "$p" ]] && [[ -x "$p" ]]; then
+            llama_server_path="$p"
+            break
         fi
-    fi
-
-    # 清理旧构建并重新编译
-    pushd "${llama_dir}" >/dev/null || fatal "无法进入 llama.cpp 目录"
-    info "清理旧构建目录 ..."
-    rm -rf build
-    check_or_mkdir build
-
-    info "运行 CMake 配置（启用 CUDA） ..."
-    # 针对 2080Ti (Turing, SM75) 优化
-    local cmake_cuda_host=""
-    local cmake_cuda_flags=""
-    if [[ -n "${CUDAHOSTCXX}" ]]; then
-        cmake_cuda_host="-DCMAKE_CUDA_HOST_COMPILER=${CUDAHOSTCXX}"
-        cmake_cuda_flags="-DCMAKE_CUDA_FLAGS=-ccbin /usr/bin/g++-10"
-    fi
-    cmake -B build \
-        -DGGML_CUDA=ON \
-        -DGGML_CUDA_F16=ON \
-        -DCMAKE_CUDA_ARCHITECTURES="75" \
-        -DGGML_NATIVE=ON \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DLLAMA_BUILD_SERVER=ON \
-        -DLLAMA_BUILD_EXAMPLES=OFF \
-        -DLLAMA_BUILD_TESTS=OFF \
-        ${cmake_cuda_host} \
-        ${cmake_cuda_flags} \
-        . || fatal "CMake 配置失败"
-
-    info "开始编译 llama.cpp（使用 $(nproc) 线程） ..."
-    make -C build -j"$(nproc)" || fatal "llama.cpp 编译失败"
-
-    popd >/dev/null || true
-
-    # 验证编译产物
-    local llama_server="${llama_bin_dir}/llama-server"
-    if [[ ! -f "${llama_server}" ]]; then
-        # 有些版本的 llama.cpp 二进制文件在 build/bin 或 build 根目录
-        if [[ -f "${llama_dir}/build/llama-server" ]]; then
-            llama_server="${llama_dir}/build/llama-server"
-        else
-            fatal "未找到 llama-server 编译产物"
-        fi
-    fi
-    ok "llama-server 编译成功: ${llama_server}"
-    "${llama_server}" --version 2>/dev/null || true
-
-    # 创建符号链接到 /usr/local/bin
-    info "安装 llama-server 到 /usr/local/bin ..."
-    sudo ln -sf "${llama_server}" /usr/local/bin/llama-server || warn "无法创建 llama-server 符号链接"
-    # 同时链接其他常用工具
-    for tool in llama-cli llama-quantize; do
-        local tool_path="${llama_bin_dir}/${tool}"
-        [[ -f "${tool_path}" ]] && sudo ln -sf "${tool_path}" "/usr/local/bin/${tool}" || true
     done
 
-    # 安装 systemd 服务
-    install_llama_systemd_service "${llama_server}" "${model_dir}"
-
-    ok "llama.cpp 编译安装完成"
-}
-
-# 安装 llama-server systemd 服务
-install_llama_systemd_service() {
-    local server_bin="$1"
-    local model_dir="$2"
-    local service_file="/etc/systemd/system/llama-server.service"
-    local model_path="${model_dir}/${MODEL_GGUF_FILENAME}"
-
-    info "创建 llama-server systemd 服务 ..."
-    # 等待模型下载完成后再实际启动服务
-    sudo tee "${service_file}" >/dev/null <<EOF
-[Unit]
-Description=llama.cpp Server (Triad)
-After=network.target
-
-[Service]
-Type=simple
-User=${USER}
-WorkingDirectory=${TRIAD_ROOT}
-Environment="CUDA_VISIBLE_DEVICES=0"
-Environment="PATH=/usr/local/cuda/bin:/usr/local/bin:/usr/bin:/bin"
-Environment="LD_LIBRARY_PATH=/usr/local/cuda/lib64"
-ExecStartPre=/bin/sh -c 'until [ -f ${model_path} ]; do echo "等待模型文件..."; sleep 5; done'
-ExecStart=${server_bin} \
-    --model ${model_path} \
-    --host ${BIND_ADDRESS} \
-    --port ${LLAMA_PORT} \
-    --ctx-size 8192 \
-    --n-gpu-layers 99 \
-    --batch-size 512 \
-    --parallel 1 \
-    --timeout 300 \
-    --chat-template chatml
-Restart=on-failure
-RestartSec=10
-StandardOutput=append:${LOG_DIR}/llama-server.log
-StandardError=append:${LOG_DIR}/llama-server.log
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    run_cmd "重新加载 systemd 配置" sudo systemctl daemon-reload
-    run_cmd "启用 llama-server 开机自启" sudo systemctl enable llama-server
-    ok "llama-server systemd 服务已安装"
-}
-
-# Qwen-14B GGUF 模型下载
-download_model() {
-    step "7" "下载 Qwen-14B Q4_K_M GGUF 模型到数据盘"
-    local model_dir
-    model_dir=$(get_data_path "models")
-    check_or_mkdir "${model_dir}"
-    local model_path="${model_dir}/${MODEL_GGUF_FILENAME}"
-
-    if [[ -f "${model_path}" ]]; then
-        local file_size
-        file_size=$(stat -c%s "${model_path}" 2>/dev/null || echo 0)
-        if [[ "${file_size}" -gt 1000000000 ]]; then
-            ok "模型文件已存在: ${model_path} ($((file_size / 1024 / 1024 / 1024))GB)"
-            return 0
-        else
-            warn "模型文件已存在但大小异常 (${file_size} bytes)，重新下载"
-            rm -f "${model_path}"
-        fi
+    # Also check PATH
+    if [[ -z "$llama_server_path" ]]; then
+        llama_server_path=$(command -v llama-server 2>/dev/null || true)
     fi
 
-    info "开始下载模型: ${MODEL_GGUF_FILENAME}"
-    info "下载地址: ${MODEL_GGUF_URL}"
-    info "保存路径: ${model_path}"
-
-    # 优先使用 wget，带重试和断点续传
-    local wget_opts="--show-progress --timeout=120 --tries=10"
-    if wget --help 2>/dev/null | grep -q 'continue'; then
-        wget_opts="${wget_opts} --continue"
+    if [[ -z "$llama_server_path" ]]; then
+        line
+        err "未检测到 llama-server 可执行文件"
+        info "llama.cpp 是 Triad 的核心依赖，请先自行编译安装："
+        info "  git clone https://github.com/ggerganov/llama.cpp.git"
+        info "  cmake -B build -DGGML_CUDA=ON"
+        info "  cmake --build build"
+        fatal "llama.cpp 未安装，安装中断"
     fi
 
-    if wget ${wget_opts} -O "${model_path}" "${MODEL_GGUF_URL}"; then
-        ok "模型下载完成"
-    else
-        warn "wget 下载失败，尝试使用 curl ..."
-        if curl -L -C - -o "${model_path}" "${MODEL_GGUF_URL}"; then
-            ok "模型下载完成 (curl)"
-        else
-            fatal "模型下载失败，请检查网络连接或手动下载到 ${model_path}"
-        fi
+    ok "检测到 llama-server: ${llama_server_path}"
+
+    # Check if running on LLAMA_PORT
+    info "检测 llama-server 是否已在端口 ${LLAMA_PORT} 运行 ..."
+    if curl -s --max-time 3 "http://localhost:${LLAMA_PORT}/health" >/dev/null 2>&1; then
+        ok "llama-server 已在端口 ${LLAMA_PORT} 运行，跳过模型下载"
+        return 0
     fi
 
-    # 验证文件大小
-    local final_size
-    final_size=$(stat -c%s "${model_path}" 2>/dev/null || echo 0)
-    info "模型文件大小: $((final_size / 1024 / 1024 / 1024))GB"
-    if [[ "${final_size}" -lt 7000000000 ]]; then
-        warn "模型文件大小异常，可能下载不完整 (${final_size} bytes)"
+    # Check if process exists but not responding
+    local llama_pids
+    llama_pids=$(pgrep -f "llama-server" 2>/dev/null || true)
+    if [[ -n "$llama_pids" ]]; then
+        warn "llama-server 进程存在但未在端口 ${LLAMA_PORT} 响应"
+        info "请启动 llama-server: nohup ${llama_server_path} -m <模型路径> --host 0.0.0.0 --port ${LLAMA_PORT} -ngl 999 ..."
+        fatal "llama-server 未正常运行，安装中断"
     fi
+
+    warn "llama-server 已编译但未启动"
+    info "请启动 llama-server 后再运行安装脚本"
+    info "示例: nohup ${llama_server_path} -m /mnt/f/AI_Models/Qwen3.6-27b.gguf --host 0.0.0.0 --port ${LLAMA_PORT} -ngl 999 --ctx-size 4096 ..."
+    fatal "llama-server 未运行，安装中断"
 }
 
 
 # Qdrant 向量数据库配置（Docker 容器）
 install_qdrant() {
-    step "8" "部署 Qdrant 向量数据库（Docker）"
+    step "7" "部署 Qdrant 向量数据库（Docker）"
     local qdrant_dir
     qdrant_dir=$(get_data_path "qdrant")
     check_or_mkdir "${qdrant_dir}"
@@ -788,7 +636,7 @@ EOF
 
 # .env 环境文件生成
 generate_env_file() {
-    step "9" "生成 .env 环境配置文件"
+    step "8" "生成 .env 环境配置文件"
     info "写入端口配置到 ${ENV_FILE} ..."
     cat > "${ENV_FILE}" <<EOF
 # Triad 环境配置文件（由 triad_manager.sh 自动生成）
@@ -829,7 +677,7 @@ EOF
 
 # Web UI 构建
 build_web_ui() {
-    step "10" "构建 Web UI"
+    step "9" "构建 Web UI"
     local web_dir="${TRIAD_ROOT}/web"
     if [[ ! -d "${web_dir}" ]]; then
         warn "未找到 web 目录 ${web_dir}，跳过 Web UI 构建"
@@ -846,7 +694,7 @@ build_web_ui() {
 
 # 安装后测试验证
 post_install_test() {
-    step "11" "安装后测试验证"
+    step "10" "安装后测试验证"
     # 检查各组件是否存在
     info "验证关键组件 ..."
     local errors=0
@@ -870,9 +718,9 @@ post_install_test() {
     fi
 
     if [[ -f "${TRIAD_ROOT}/llama.cpp/build/bin/llama-server" ]] || [[ -f "${TRIAD_ROOT}/llama.cpp/build/llama-server" ]]; then
-        ok "llama.cpp: 已编译"
+        ok "llama.cpp: 已安装"
     else
-        err "llama.cpp: 未编译"; ((errors++))
+        warn "llama.cpp: 未检测到运行中的 llama-server"
     fi
 
     local model_path
@@ -925,23 +773,19 @@ cmd_install() {
     # 步骤 5: Node.js 环境
     install_node_env
 
-    # 步骤 6: llama.cpp 编译
-    install_llama_cpp
+    # 步骤 6: llama.cpp 检测
+    check_llama_cpp
 
-    # 步骤 7: 模型下载
-    download_model
-
-
-    # 步骤 8: Qdrant 配置
+    # 步骤 7: Qdrant 配置
     install_qdrant
 
-    # 步骤 9: .env 生成
+    # 步骤 8: .env 生成
     generate_env_file
 
-    # 步骤 10: Web UI 构建
+    # 步骤 9: Web UI 构建
     build_web_ui
 
-    # 步骤 11: 测试验证
+    # 步骤 10: 测试验证
     post_install_test
 
     line
@@ -1310,8 +1154,8 @@ ${C_BOLD}install 流程:${C_RESET}
     3. 安装 docker-ce + nvidia-container-toolkit
     4. 安装 Python 3.10 + pip 依赖
     5. 安装 Node.js 18 + npm 依赖
-    6. 编译安装 llama.cpp（CUDA 支持，Turing SM75）
-    7. 下载 Qwen-14B Q4_K_M GGUF 模型到数据盘
+    6. 检测 llama.cpp 运行状态
+    7. 部署 Qdrant 向量数据库（Docker）
     8. 生成 .env 文件（大端口 + 0.0.0.0）
     9. 构建 Web UI
     10. 安装后测试验证
