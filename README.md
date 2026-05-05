@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://raw.githubusercontent.com/iprisoner/Triad/main/assets/logo.png" alt="Triad Logo" width="120">
 </p>
-<h1 align="center">Triad v2.2 🦞 Lobster Station</h1>
+<h1 align="center">Triad v2.3 🦞 Lobster Station</h1>
 <p align="center">
   <strong>本地 AI 智能体操作系统 · 蜂群并发 · 显存跷跷板 · 动态路由</strong>
 </p>
@@ -28,7 +28,7 @@ Triad 是一款运行在**本地 WSL2 环境**中的三层架构 AI 智能体操
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         🦞 浏览器多标签工作台                                  │
-│            [🦞 龙虾控制台]  [🎨 ComfyUI 画布]  [📊 系统监控]                   │
+│            [🦞 龙虾控制台]  [📊 系统监控]                                      │
 │              React 18 + Vite + Tailwind + shadcn/ui                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                         OpenClaw Gateway (Node.js/TS)                          │
@@ -36,10 +36,10 @@ Triad 是一款运行在**本地 WSL2 环境**中的三层架构 AI 智能体操
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                         Hermes 认知编排层 (Python 3.10+)                        │
 │  动态角色路由 · 蜂群调度(SwarmExecutor) · 技能进化(SkillCrystallizer)           │
-│  动态评估(小说/代码/bypass) · 动态多模态(显式/art/bypass)                       │
+│  动态评估(小说/代码/bypass) · 本地推理路由                                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                         多模态执行层                                          │
-│  llama-server (Docker, -ngl 99↔0 跷跷板) · ComfyUI (venv, :8188)              │
+│                         本地推理执行层                                        │
+│  llama-server (Docker, -ngl 99↔0 跷跷板)  本地推理                            │
 │  VRAMScheduler (读者-写者锁 · NUMA 亲和性调度)                                 │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -48,7 +48,7 @@ Triad 是一款运行在**本地 WSL2 环境**中的三层架构 AI 智能体操
 
 ## ✨ 核心特性
 
-### 已生产就绪 (v2.2)
+### 已生产就绪 (v2.3)
 
 | 特性 | 说明 | 状态 |
 |------|------|------|
@@ -58,7 +58,6 @@ Triad 是一款运行在**本地 WSL2 环境**中的三层架构 AI 智能体操
 | **显存跷跷板** | `-ngl 99↔0` GPU/CPU 自动切换，**推理引用计数锁**保证切换安全 | ✅ |
 | **技能进化** | 高分任务自动固化配方为 Markdown+YAML，**语义去重** + 适者生存 | ✅ |
 | **动态评估** | 小说→4维评估，代码→AST占位，通用→bypass，绝不浪费算力 | ✅ |
-| **动态多模态** | 仅 art_director / 显式画图指令才触发 ComfyUI，避免错误 VRAM 切换 | ✅ |
 | **断连恢复** | WebSocket 断开后重连自动恢复任务历史和进度（内存级持久化） | ✅ |
 | **上下文压缩** | Map-Reduce 自动压缩超长聚合结果，防止 8192 窗口溢出 | ✅ |
 | **系统监控** | 3秒轮询 GPU/容器/llama/CPU/内存，实时显存条可视化 | ✅ |
@@ -97,7 +96,7 @@ chmod +x triad_manager.sh
 # [✓] Docker 镜像拉取完成
 # [✓] Web UI 构建完成
 # [✓] Qwen GGUF 模型就绪
-# [✓] ComfyUI venv 安装完成
+# [✓] llama.cpp 检测模式（用户自行安装）
 # [✓] .env 已生成
 
 # 3. 填入 API Key（必须）
@@ -116,14 +115,13 @@ open http://localhost:8080/panel
 
 ```
 ╔═══════════════════════════════════════════════════════════╗
-║              🟣 Triad Station v2.2 启动成功              ║
+║              🟣 Triad Station v2.3 启动成功              ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  Web UI:     http://localhost:8080/panel                  ║
 ║  Gateway:    ws://localhost:8080/ws/tasks               ║
 ║  llama-server: http://localhost:8000/v1/chat/completions ║
-║  ComfyUI:   http://localhost:8188                        ║
 ╠═══════════════════════════════════════════════════════════╣
-║  标签页: [🦞 龙虾控制台] [🎨 ComfyUI] [📊 系统监控]          ║
+║  标签页: [🦞 龙虾控制台] [📊 系统监控]                     ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  VRAM 初始:                                               ║
 ║    [2GB Embed][████████████][9GB LLM GPU]               ║
@@ -148,10 +146,8 @@ triad/
 │   └── acp_adapter/
 │       └── streaming_reporter.py  # 状态回传总线
 │
-├── hand/                          # 多模态执行层
+├── hand/                          # 本地推理执行层
 │   ├── vram_scheduler_llama.py   # VRAM 调度器：-ngl 跷跷板 + 全局锁
-│   ├── comfyui_mcp_bridge.py      # ComfyUI 桥接：JSON 参数注入
-│   └── character_concept_api.json # 工作流模板
 │
 ├── host/openclaw/src/gateway/     # 后端网关 (TypeScript)
 │   ├── websocket.ts               # WebSocket Server + 断连恢复
@@ -171,8 +167,8 @@ triad/
 │       └── useWebSocket.ts        # WebSocket 连接管理
 │
 ├── docs/                          # 文档
-│   ├── TECHNICAL_WHITEPAPER_v2.2.md   # 技术白皮书
-│   ├── USER_GUIDE_v2.2.md            # 用户指南
+│   ├── TECHNICAL_WHITEPAPER_v2.3.md   # 技术白皮书
+│   ├── USER_GUIDE_v2.3.md            # 用户指南
 │   └── CONTINUATION_GUIDE.md          # 上下文恢复包
 │
 ├── docker-compose.hpc.yml         # Docker 编排
@@ -221,8 +217,8 @@ triad/
 
 | 文档 | 说明 |
 |------|------|
-| [技术白皮书](triad/docs/TECHNICAL_WHITEPAPER_v2.2.md) | 架构全景图、完成度详表、API 参考、数据流图示 |
-| [用户指南](triad/docs/USER_GUIDE_v2.2.md) | 角色速查表、30分钟上手教程、FAQ |
+| [技术白皮书](triad/docs/TECHNICAL_WHITEPAPER_v2.3.md) | 架构全景图、完成度详表、API 参考、数据流图示 |
+| [用户指南](triad/docs/USER_GUIDE_v2.3.md) | 角色速查表、30分钟上手教程、FAQ |
 | [续接指南](triad/docs/CONTINUATION_GUIDE.md) | 上下文恢复包（用于新 AI 助手续接） |
 
 ---
@@ -262,7 +258,6 @@ triad/
 | 限制 | 说明 | 预计解决 |
 |------|------|---------|
 | 云端 API Key 需手动填入 | `.env` 模板需复制为 `.env` 并填入真实 Key | 用户操作，5分钟 |
-| ComfyUI JSON 模板需手动导出 | 需在 ComfyUI 网页搭建工作流 → Save API Format → 放到 `hand/` | 用户操作，15分钟 |
 | CodeCurator 为占位符 | 代码评估当前返回满分 10.0，AST 静态检查（pylint/mypy）待接入 | v2.3 |
 | 蜂群角色需手动在 roles.py 添加 | `@deep_research_swarm` 等需定义 `is_swarm=True` | 未来 Web UI 支持 |
 
@@ -270,8 +265,8 @@ triad/
 
 ## 🗺️ Roadmap
 
-### 已实现（v2.2）
-- [x] 多标签工作台（龙虾/ComfyUI/监控）
+### 已实现（v2.3）
+- [x] 多标签工作台（龙虾/监控）
 - [x] 单 Agent 多角色（5 个内置角色）
 - [x] 动态模型注册表（无限添加，Web UI 管理）
 - [x] 系统监控探针（GPU/容器/llama/CPU/内存）
@@ -279,13 +274,12 @@ triad/
 - [x] 蜂群调度器（SwarmExecutor）— 多 Agent 并发协作
 - [x] 技能结晶器（SkillCrystallizer）— 成功配方自动固化与进化
 - [x] 动态评估路由 — 小说评估 / 代码跳过 / 通用 bypass
-- [x] 动态多模态路由 — art_director 自动触发 / 关键词检测
 - [x] VRAM 死锁防护（推理引用计数 + 全局锁）
 - [x] 上下文压缩（Map-Reduce Token 上限）
 - [x] 配方语义去重（适者生存，不野蛮繁殖）
 - [x] WebSocket 断连恢复（任务状态持久化）
 
-### 下一步（v2.3）
+### 下一步（v2.4）
 - [ ] Web UI 直接添加自定义角色（不用改代码）
 - [ ] CodeCurator 真实 AST 静态检查（pylint/mypy/pytest）
 - [ ] 语音输入/输出集成
@@ -297,7 +291,7 @@ triad/
 
 - **文件数**: 79 个
 - **代码行**: ~16,500 行（Python/TypeScript/TSX/Bash/YAML）
-- **提交**: `3d8a96d` — Triad v2.2: Full production-ready release
+- **提交**: `3d8a96d` — Triad v2.3: Full production-ready release
 
 ---
 
@@ -318,5 +312,5 @@ Triad 是一个持续演进的社区项目。欢迎通过以下方式参与：
 ---
 
 <p align="center">
-  <strong>Triad v2.2 — 本地智能体操作系统，数据不出站，算力全掌控。</strong>
+  <strong>Triad v2.3 — 本地智能体操作系统，数据不出站，算力全掌控。</strong>
 </p>
