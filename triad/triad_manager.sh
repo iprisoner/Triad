@@ -502,6 +502,13 @@ install_python_env() {
 # Node.js 18 与 npm 依赖安装
 install_node_env() {
     step "5" "安装 Node.js 18 与 npm 依赖"
+    
+    # 安装 lsof（端口检测工具，cmd_stop/cmd_status 依赖）
+    if ! command -v lsof &>/dev/null; then
+        info "安装 lsof (端口检测工具) ..."
+        apt-get install -y lsof || warn "lsof 安装失败，端口检测可能不可用"
+    fi
+    
     if ! command -v node &>/dev/null || [[ "$(node -v | cut -d'v' -f2 | cut -d'.' -f1)" != "18" ]]; then
         info "安装 Node.js 18 LTS ..."
         # 卸载旧版本
@@ -1066,16 +1073,16 @@ cmd_status() {
     sudo docker ps --filter "name=triad-" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || true
     line
 
-    info "systemd 服务状态:"
-    for svc in llama-server; do
-        local sys_status
-        sys_status=$(sudo systemctl is-active "${svc}" 2>/dev/null || echo "unknown")
-        if [[ "${sys_status}" == "active" ]]; then
-            printf "%-20s ${C_GREEN}%-20s${C_RESET}\n" "${svc}" "${sys_status}"
-        else
-            printf "%-20s ${C_YELLOW}%-20s${C_RESET}\n" "${svc}" "${sys_status}"
-        fi
-    done
+        info "后台进程状态:"
+    local llama_pid
+    llama_pid=$(pgrep -f "llama-server" 2>/dev/null || true)
+    if [[ -n "${llama_pid}" ]]; then
+        printf "%-20s ${C_GREEN}%-20s${C_RESET} (PID: %s)
+" "llama-server" "running" "${llama_pid}"
+    else
+        printf "%-20s ${C_YELLOW}%-20s${C_RESET}
+" "llama-server" "stopped"
+    fi
     line
 
     info "GPU 状态:"
