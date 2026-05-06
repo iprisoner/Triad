@@ -556,12 +556,33 @@ class VRAMScheduler:
             await asyncio.sleep(1.5)
 
         await self._set_state(VRAMState.IDLE)
-        self._stats["renders_completed"] += 1
         await self._emit_progress(task.task_id, 1.0, "VRAM released, LLM ready")
 
     # ------------------------------------------------------------------
     # 查询接口
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # LLM 推理引用计数（v2.3 新增：兼容 hermes_orchestrator 调用）
+    # ------------------------------------------------------------------
+
+    async def begin_llm_inference(self, timeout_sec: float = 5.0) -> bool:
+        """
+        声明开始一次本地 LLM 推理。
+        在 VRAM 切换期间阻塞推理请求，防止显存竞争。
+        """
+        t0 = time.time()
+        while self._state in (VRAMState.CPU_FALLBACK, VRAMState.RENDERING, VRAMState.RECOVERING):
+            elapsed = time.time() - t0
+            if elapsed >= timeout_sec:
+                logger.warning(f"begin_llm_inference 超时 ({timeout_sec}s): VRAM 处于 {self._state.name}")
+                return False
+            await asyncio.sleep(0.2)
+        return True
+
+    async def end_llm_inference(self) -> None:
+        """声明结束一次本地 LLM 推理（当前为无操作，由 begin 的 timeout 保护）。"""
+        pass
 
     def get_stats(self) -> Dict[str, Any]:
         return dict(self._stats)
@@ -632,11 +653,13 @@ class RenderContext:
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         await self.scheduler._release_render_context(self.task, self.mode)
+        total_time = time.time() - self.acquired_at
+        self.scheduler._stats["total_render_time_sec"] += total_time
         if exc_type is not None:
             self.scheduler._stats["renders_failed"] += 1
             logger.error(f"Render task {self.task.task_id} failed: {exc}")
-        total_time = time.time() - self.acquired_at
-        self.scheduler._stats["total_render_time_sec"] += total_time
+        else:
+            self.scheduler._stats["renders_completed"] += 1
         logger.info(f"RenderContext exited for {self.task.task_id} ({total_time:.1f}s)")
 
 
