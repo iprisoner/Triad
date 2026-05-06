@@ -119,7 +119,7 @@ services:
         - NODE_ENV=production
     image: triad/openclaw:hpc-latest
     container_name: triad-openclaw
-    restart: unless-stopped
+    # restart: unless-stopped
 
     # CPU 亲和性: Node 0 前 8 核 (0-7 物理, 24-31 SMT)
     # 保留 Node 0 后 4 核给 Hermes，避免同 Node 竞争内存带宽
@@ -129,14 +129,14 @@ services:
     # WSL2 下若 numactl 不可用，则依赖 cpuset 的隐式 NUMA 倾向
     # 原生 Linux 建议 uncomment: command 前缀添加 numactl --cpunodebind=0 --membind=0
 
-    deploy:
-      resources:
-        limits:
+    # deploy:
+      # resources:
+        # limits:
           # 限制在 Node 0 本地内存 (约 64GB 总量，分配 16GB 给 Gateway)
-          memory: 16G
+          # memory: 16G
           # 禁用 swap 避免 IO 抖动穿透到 WSL2 VHD
-          swap: 0
-        reservations:
+          # swap: 0
+        # reservations:
           memory: 4G
 
     # 特权与能力 — 仅保留 ClawPod 管理所需的最小能力集
@@ -150,7 +150,7 @@ services:
       - seccomp:./openclaw/seccomp-profile.json
       - no-new-privileges:true
 
-    environment:
+    # environment:
       # ACP (Agent Control Protocol) 监听端口
       ACP_BIND_ADDR: "0.0.0.0:17001"
       ACP_WORKERS: "8"                          # 匹配绑定的 8 物理核
@@ -173,7 +173,7 @@ services:
       MCP_REGISTRY_URL: "http://registry:18500"
 
       # 本地 LLM 路由 (单一 llama-server 端点，OpenAI 兼容格式)
-      MODEL_API_URL_PRIMARY: "http://llama-server:8080/v1"     # llama.cpp OpenAI 兼容 API
+      MODEL_API_URL_PRIMARY: "http://192.168.0.128:40080/v1"     # ← 外部 Llama-Server WSL     # llama.cpp OpenAI 兼容 API
       MODEL_API_URL_SECONDARY: ""                                # 无次要本地 LLM
       MODEL_API_URL_FALLBACK: ""                                 # 云端 API (Claude/OpenAI)
       MODEL_ROUTING_STRATEGY: "local-priority"                   # local-priority | round-robin | fallback
@@ -182,25 +182,25 @@ services:
       LOG_LEVEL: "info"
       OTEL_EXPORTER_OTLP_ENDPOINT: ""
 
-    ports:
+    # ports:
       - "17001:17001"      # ACP Agent Control Protocol
       - "17002:17002"      # WebSocket 流式推送
       - "18080:18080"      # HTTP API / 技能市场 UI
 
-    volumes:
+    # volumes:
       - openclaw-state:/app/state
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - clawpod-shared:/shared:ro
 
-    networks:
+    # networks:
       - triad-core
-      - triad-worker
+      # - triad-worker
 
-    healthcheck:
+    # healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:18080/health"]
       interval: 30s
-      timeout: 5s
-      retries: 3
+      # timeout: 5s
+      # retries: 3
       start_period: 10s
 
     # 调度优先级 — 确保 Gateway 在 Hermes 之前启动
@@ -236,14 +236,14 @@ services:
           memory: 24G
           swap: 0
         reservations:
-          memory: 8G
+          # memory: 8G
           # GPU 预留: NVIDIA 2080Ti (不支持 MIG，使用整卡 + 显存软限制)
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+          # devices:
+            # - driver: nvidia
+              # count: 1
+              # capabilities: [gpu]
 
-    runtime: nvidia
+    # runtime: nvidia
 
     # 环境变量 — 显存分区与模型配置
     environment:
@@ -257,8 +257,8 @@ services:
       # 魔改 2080Ti 22GB 显存分配策略 (llama.cpp 版)
       # 常驻区: 2GB (本服务独占) — BGE-large Embedding
       # 通过 PyTorch 显存预留实现软隔离
-      CUDA_VISIBLE_DEVICES: "0"
-      NVIDIA_VISIBLE_DEVICES: "0"
+      # CUDA_VISIBLE_DEVICES: "0"
+      # NVIDIA_VISIBLE_DEVICES: "0"
       
       # 限制 PyTorch CUDA 显存分配池 (常驻 2GB)
       PYTORCH_CUDA_ALLOC_CONF: "max_split_size_mb:512,expandable_segments:True"
@@ -295,8 +295,8 @@ services:
       QDRANT_VECTOR_SIZE: "1024"         # bge-large 输出维度
 
       # ===== 本地 LLM 动态路由 (llama.cpp OpenAI 兼容) =====
-      LLM_API_URL: "http://llama-server:8080/v1/chat/completions"
-      LLM_API_BASE: "http://llama-server:8080"                  # OpenAI 兼容基础 URL
+      LLM_API_URL: "http://192.168.0.128:40080/v1/chat/completions"
+      LLM_API_BASE: "http://192.168.0.128:40080"                  # OpenAI 兼容基础 URL
       LLM_MODEL_NAME: "qwen-14b-chat.Q4_K_M.gguf"               # 默认模型标识
       FALLBACK_CLOUD_API_URL: ""                                 # 云端降级
 
@@ -445,13 +445,13 @@ services:
   # 显存策略: GPU 常态 -ngl 99 (约 9GB)，渲染态由 vram_scheduler 切换为 -ngl 0 (0GB VRAM)
   # 重要: command 由宿主机 vram_scheduler.py 外部进程管理动态覆写，此处仅提供默认 GPU 启动参数
   # =========================================================================
-  llama-server:
-    image: ghcr.io/ggerganov/llama.cpp:server-cuda
-    container_name: triad-llama-server
+  # llama-server:
+    # image: ghcr.io/ggerganov/llama.cpp:server-cuda
+    # container_name: triad-llama-server
     restart: unless-stopped
 
     # 绑定 Node 1 剩余核心 (原 vllm/ollama 位置)
-    cpuset: "20-23,44-47"
+    # cpuset: "20-23,44-47"
 
     deploy:
       resources:
@@ -474,44 +474,44 @@ services:
     # 默认 GPU 启动命令 (-ngl 99  offload 所有层到 GPU)
     # vram_scheduler.py 在渲染需要时会通过 docker compose exec / docker restart 等方式
     # 动态替换为 CPU 模式: -ngl 0 (权重保留在系统内存，GPU 显存完全释放)
-    command: >
-      llama-server
-      -m /models/qwen-14b-chat.Q4_K_M.gguf
-      --host 0.0.0.0
-      --port 8080
-      -ngl 99
-      -c 8192
-      --metrics
-      --slots
-      --cont-batching
-      -np 4
+    # command: >
+      # llama-server
+      # -m /models/qwen-14b-chat.Q4_K_M.gguf
+      # --host 0.0.0.0
+      # --port 8080
+      # -ngl 99
+      # -c 8192
+      # --metrics
+      # --slots
+      # --cont-batching
+      # -np 4
 
     ports:
-      - "18001:8080"
+      # - "18001:8080"
 
     volumes:
       # GGUF 模型文件挂载: 宿主机 ~/.triad/models/ → 容器 /models
-      - type: bind
-        source: ~/.triad/models
-        target: /models
-        read_only: true
+      # - type: bind
+        # source: ~/.triad/models
+        # target: /models
+        # read_only: true
       # 外部记忆/上下文注入卷 (可由 Hermes 或 vram_scheduler 写入)
-      - triad-memory:/data/memory:ro
+      # - triad-memory:/data/memory:ro
 
     networks:
       - triad-worker
 
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 10s
+      # test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      # interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 60s
+      # start_period: 60s
 
-    profiles:
-      - "local-llm"
-      - "hpc-full"
-      - "debug"
+    # profiles:
+      # - "local-llm"
+      # - "hpc-full"
+      # - "debug"
 
   # =========================================================================
   # ClawPod 容器模板 — 任务执行沙箱 (多规格)
@@ -672,7 +672,7 @@ services:
 
       TASK_BROKER_URL: "http://openclaw:17001"
       EMBEDDING_API_URL: "http://hermes:19000"
-      LOCAL_LLM_URL: "http://llama-server:8080/v1/chat/completions"
+      LOCAL_LLM_URL: "http://192.168.0.128:40080/v1/chat/completions"
 
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -759,8 +759,8 @@ services:
       NVIDIA_VISIBLE_DEVICES: "0"
       
       # 大规格容器内可直接调用 llama-server OpenAI 兼容 API
-      LOCAL_LLM_URL: "http://llama-server:8080/v1/chat/completions"
-      LOCAL_LLM_BASE: "http://llama-server:8080"
+      LOCAL_LLM_URL: "http://192.168.0.128:40080/v1/chat/completions"
+      LOCAL_LLM_BASE: "http://192.168.0.128:40080"
 
       # Python 多线程优化
       OMP_NUM_THREADS: "8"
