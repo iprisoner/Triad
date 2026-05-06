@@ -166,7 +166,13 @@ ps_exec() {
     local output
 
     log_info "执行: $desc"
-    output=$($PS_CMD -NoProfile -NonInteractive -Command "$cmd" 2>&1) || true
+    local rc=0
+    output=$($PS_CMD -NoProfile -NonInteractive -Command "$cmd" 2>&1) || rc=$?
+    if [[ $rc -ne 0 ]]; then
+        log_error "[$label] PowerShell command failed with exit code $rc"
+        echo "$output" | head -5 | while read -r line; do log_warn "  > $line"; done
+        return $rc
+    fi
 
     # 检查常见错误
     if echo "$output" | grep -qi "Access is denied"; then
@@ -210,13 +216,13 @@ setup_port_forward() {
 
     # 先删除可能存在的旧规则（避免冲突）
     $PS_CMD -NoProfile -Command "
-        netsh interface portproxy delete v4tov4 listenport=${listen_port} listenaddress=0.0.0.0 2>&1 | Out-Null
-        netsh interface portproxy delete v4tov4 listenport=${listen_port} listenaddress=0.0.0.0 2>&1 | Out-Null
+        netsh interface portproxy delete v4tov4 listenport=${listen_port} listenaddress=127.0.0.1 2>&1 | Out-Null
+        netsh interface portproxy delete v4tov4 listenport=${listen_port} listenaddress=127.0.0.1 2>&1 | Out-Null
     " 2>/dev/null || true
 
     # 添加新规则（同时绑定 0.0.0.0）
     ps_exec "
-        \$err1 = netsh interface portproxy add v4tov4 listenport=${listen_port} listenaddress=0.0.0.0 connectport=${connect_port} connectaddress=${wsl_ip} 2>&1
+        \$err1 = netsh interface portproxy add v4tov4 listenport=${listen_port} listenaddress=127.0.0.1 connectport=${connect_port} connectaddress=${wsl_ip} 2>&1
         if (\$err1 -match 'Access is denied|elevation') { exit 1 }
         Write-Output 'PortProxy-OK'
     " "netsh portproxy add ${listen_port}"
@@ -227,7 +233,7 @@ setup_port_forward() {
         # 先删除旧规则
         Remove-NetFirewallRule -DisplayName '${fw_rule_name}' -ErrorAction SilentlyContinue 2>&1 | Out-Null
         # 添加入站规则
-        New-NetFirewallRule -DisplayName '${fw_rule_name}' -Direction Inbound -Action Allow -Protocol TCP -LocalPort ${listen_port} -ErrorAction Stop | Out-Null
+        New-NetFirewallRule -DisplayName '${fw_rule_name}' -Direction Inbound -Action Allow -Protocol TCP -LocalPort ${listen_port} -RemoteAddress 127.0.0.1 -ErrorAction Stop | Out-Null
         Write-Output 'Firewall-OK'
     " "防火墙规则 ${listen_port}"
 
@@ -243,8 +249,8 @@ clean_port_forward() {
 
     # 删除 portproxy
     $PS_CMD -NoProfile -Command "
-        netsh interface portproxy delete v4tov4 listenport=${listen_port} listenaddress=0.0.0.0 2>&1 | Out-Null
-        netsh interface portproxy delete v4tov4 listenport=${listen_port} listenaddress=0.0.0.0 2>&1 | Out-Null
+        netsh interface portproxy delete v4tov4 listenport=${listen_port} listenaddress=127.0.0.1 2>&1 | Out-Null
+        netsh interface portproxy delete v4tov4 listenport=${listen_port} listenaddress=127.0.0.1 2>&1 | Out-Null
         Write-Output 'Deleted'
     " 2>/dev/null || true
 
