@@ -367,9 +367,10 @@ class ComfyUIClient:
         self._connected = False
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
-        return self._session
+        async with self._connect_lock:
+            if self._session is None or self._session.closed:
+                self._session = aiohttp.ClientSession()
+            return self._session
 
     async def health_check(self) -> Dict[str, Any]:
         """
@@ -406,11 +407,13 @@ class ComfyUIClient:
 
     async def connect(self) -> None:
         """建立 WebSocket 连接并启动消息循环。"""
-        if self._connected:
-            return
-        self._ws_task = asyncio.create_task(self._ws_loop())
-        self._connected = True
-        logger.info(f"ComfyUI WebSocket connecting to {self.ws_url}")
+        async with self._connect_lock:
+            if self._connected:
+                return
+            self._ws_task = asyncio.create_task(self._ws_loop())
+            self._connected = True
+            self._reconnect_delay = 3.0  # 重置退避
+            logger.info(f"ComfyUI WebSocket connecting to {self.ws_url}")
 
     async def disconnect(self) -> None:
         self._connected = False
@@ -439,8 +442,9 @@ class ComfyUIClient:
                             data = json.loads(message)
                             await self._handle_ws_message(data)
             except Exception as e:
-                logger.warning(f"WebSocket error: {e}; reconnecting in 3s ...")
-                await asyncio.sleep(3)
+                self._reconnect_delay = min(self._reconnect_delay * 1.5, 60.0)
+                logger.warning(f"WebSocket error: {e}; reconnecting in {self._reconnect_delay:.1f}s ...")
+                await asyncio.sleep(self._reconnect_delay)
 
     async def _handle_ws_message(self, data: Dict[str, Any]) -> None:
         msg_type = data.get("type")
