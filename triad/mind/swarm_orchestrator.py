@@ -376,12 +376,12 @@ class SwarmExecutor:
                         and hasattr(self.vram_scheduler, "begin_llm_inference")
                     )
                     if has_vram_scheduler:
-                    try:
-                        inference_ok = await self.vram_scheduler.begin_llm_inference(timeout_sec=5.0)
-                        if not inference_ok:
-                            self.logger.warning(f"[{agent.name}] VRAM 切换中，推理请求排队超时，继续尝试...")
-                    except Exception as vram_exc:
-                        self.logger.warning(f"[{agent.name}] begin_llm_inference 失败 (非致命): {vram_exc}")
+                        try:
+                            inference_ok = await self.vram_scheduler.begin_llm_inference(timeout_sec=5.0)
+                            if not inference_ok:
+                                self.logger.warning(f"[{agent.name}] VRAM 切换中，推理请求排队超时，继续尝试...")
+                        except Exception as vram_exc:
+                            self.logger.warning(f"[{agent.name}] begin_llm_inference 失败 (非致命): {vram_exc}")
 
                 prompt_with_system = (
                     f"[系统指令]\n{agent.system_prompt}\n\n"
