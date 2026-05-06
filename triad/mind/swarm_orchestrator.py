@@ -867,3 +867,6 @@ class SwarmExecutor:
             temperature=temperature,
             max_tokens=max_tokens,
         )
+
+# v2.3.1: 别名兼容（文件名是 swarm_orchestrator，类名是 SwarmExecutor）
+SwarmOrchestrator = SwarmExecutor
