@@ -365,6 +365,7 @@ class ComfyUIClient:
         self._ws_task: Optional[asyncio.Task] = None
         self._ws_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
         self._connected = False
+        self._connect_lock = asyncio.Lock()  # v2.3.1-fix: ComfyUIClient needs its own lock
 
     async def _get_session(self) -> aiohttp.ClientSession:
         async with self._connect_lock:
