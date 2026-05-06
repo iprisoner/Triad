@@ -399,6 +399,8 @@ class SwarmExecutor:
                         except Exception as vram_exc:
                             self.logger.warning(f"[{agent.name}] begin_llm_inference 失败 (非致命): {vram_exc}")
 
+                except Exception as _vram_outer_exc:
+                    self.logger.warning(f"[{agent.name}] VRAM 调度器检查失败 (非致命): {_vram_outer_exc}")
                 prompt_with_system = (
                     f"[系统指令]\n{agent.system_prompt}\n\n"
                     f"[用户请求]\n{task.description}"
