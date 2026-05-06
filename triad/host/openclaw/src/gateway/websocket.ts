@@ -505,7 +505,7 @@ export class TaskWebSocketGateway {
         try {
           const body = req.body as PushResultRequest;
 
-          if (!body.taskId || !body.status || !body.output) {
+          if (body.taskId === undefined || body.status === undefined || body.output === undefined) {
             res.status(400).json({
               success: false,
               error: 'MISSING_FIELDS',
@@ -756,12 +756,15 @@ export class TaskWebSocketGateway {
   private removeConnectionBySocket(ws: WebSocket): void {
     this.heartbeatMap.delete(ws);
 
+    const removed: string[] = [];
     for (const [taskId, socket] of this.connections.entries()) {
       if (socket === ws) {
         this.connections.delete(taskId);
-        console.log(`[Gateway] Removed connection mapping for task ${taskId.substring(0, 8)}...`);
-        break;
+        removed.push(taskId);
       }
+    }
+    if (removed.length > 0) {
+      console.log(`[Gateway] Removed ${removed.length} connection mapping(s) for disconnected client`);
     }
   }
 
