@@ -901,7 +901,7 @@ cmd_start() {
     if [[ -d "${openclaw_dir}" ]] && [[ -f "${openclaw_dir}/package.json" ]]; then
         pushd "${openclaw_dir}" >/dev/null || true
         if [[ -f .env ]]; then
-            export $(grep -v '^#' .env | xargs) 2>/dev/null || true
+            set -a; source .env 2>/dev/null || true; set +a
         fi
         nohup npm start >> "${LOG_DIR}/openclaw.log" 2>&1 &
         popd >/dev/null || true
@@ -917,7 +917,7 @@ cmd_start() {
     if [[ -d "${hermes_dir}" ]] && [[ -f "${hermes_dir}/hermes_orchestrator.py" ]]; then
         pushd "${hermes_dir}" >/dev/null || true
         if [[ -f .env ]]; then
-            export $(grep -v '^#' .env | xargs) 2>/dev/null || true
+            set -a; source .env 2>/dev/null || true; set +a
         fi
         if [[ -f "${venv_dir}/bin/python" ]]; then
             nohup "${venv_dir}/bin/python" hermes_orchestrator.py >> "${LOG_DIR}/hermes.log" 2>&1 &
