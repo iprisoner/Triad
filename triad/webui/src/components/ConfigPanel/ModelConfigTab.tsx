@@ -35,7 +35,9 @@ export function ModelConfigTab() {
   });
 
   useEffect(() => {
-    const saved = localStorage.getItem('triad_vendor_keys');
+    // v2.3.1: API Key 不再持久化到 localStorage，仅保存在内存中（刷新丢失但安全）
+    // 如需持久化，请接入后端加密存储或操作系统密钥环
+    const saved = null;
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -46,7 +48,7 @@ export function ModelConfigTab() {
         // ignore
       }
     }
-    const local = localStorage.getItem('triad_local_config');
+    const local = null;
     if (local) {
       try {
         setLocalConfig(JSON.parse(local));
@@ -61,8 +63,8 @@ export function ModelConfigTab() {
     vendors.forEach((v) => {
       payload[v.key] = v.apiKey;
     });
-    localStorage.setItem('triad_vendor_keys', JSON.stringify(payload));
-    localStorage.setItem('triad_local_config', JSON.stringify(localConfig));
+    // v2.3.1: 不再写入 localStorage — API Key 仅保存在内存中
+    console.log('[Security] API keys held in memory only (not persisted)');
   };
 
   const checkHealth = (idx: number) => {
