@@ -681,7 +681,7 @@ class HermesOrchestrator:
 
     async def process_task(self, task_request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        处理单个任务请求，执行完整 5 步流水线。
+        处理单个任务请求，执行完整 5 步流水线（v2.3.1: 整体超时保护）。
 
         Args:
             task_request: 必须包含 "taskId" 和 "raw_input"；
@@ -1035,10 +1035,12 @@ class HermesOrchestrator:
     # ------------------------------------------------------------------
 
     async def process_tasks_stream(
-        self, task_requests: List[Dict[str, Any]], max_concurrency: int = 3
+        self, task_requests: List[Dict[str, Any]], max_concurrency: int = 3,
+        overall_timeout_sec: float = 600.0,
     ) -> AsyncIterator[Dict[str, Any]]:
         """
         批量处理任务，返回异步生成器，支持流式消费结果。
+        v2.3.1: 添加 overall_timeout_sec 防止永久阻塞。
 
         Args:
             task_requests: 任务请求列表
@@ -1052,7 +1054,19 @@ class HermesOrchestrator:
 
         async def _bounded_process(req: Dict[str, Any]) -> Dict[str, Any]:
             async with semaphore:
-                return await self.process_task(req)
+                try:
+                    return await asyncio.wait_for(
+                        self.process_task(req),
+                        timeout=overall_timeout_sec,
+                    )
+                except asyncio.TimeoutError:
+                    task_id = req.get("taskId", "unknown")
+                    logger.error(f"[{task_id}] 任务处理超时 ({overall_timeout_sec}s)")
+                    return {
+                        "taskId": task_id,
+                        "status": "failed",
+                        "error": f"task_timeout: exceeded {overall_timeout_sec}s",
+                    }
 
         # 使用 as_completed 保证结果按完成顺序 yield，实现真正的流式
         pending = [asyncio.create_task(_bounded_process(req)) for req in task_requests]
@@ -1065,10 +1079,12 @@ class HermesOrchestrator:
                 yield {"status": "failed", "error": f"batch_exception: {exc}"}
 
     async def process_tasks(
-        self, task_requests: List[Dict[str, Any]], max_concurrency: int = 3
+        self, task_requests: List[Dict[str, Any]], max_concurrency: int = 3,
+        overall_timeout_sec: float = 600.0,
     ) -> List[Dict[str, Any]]:
         """
         批量处理任务，返回完整结果列表（按完成顺序）。
+        v2.3.1: 添加 overall_timeout_sec 防止永久阻塞。
 
         Args:
             task_requests: 任务请求列表
@@ -1078,7 +1094,7 @@ class HermesOrchestrator:
             结果 dict 列表
         """
         results: List[Dict[str, Any]] = []
-        async for result in self.process_tasks_stream(task_requests, max_concurrency):
+        async for result in self.process_tasks_stream(task_requests, max_concurrency, overall_timeout_sec):
             results.append(result)
         return results
 
