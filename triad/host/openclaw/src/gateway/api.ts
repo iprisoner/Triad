@@ -372,6 +372,23 @@ router.post("/models/:id/test", async (req: Request, res: Response) => {
       return;
     }
 
+    // SSRF 防护：校验 base_url 禁止内网地址
+    try {
+      const parsed = new URL(p.base_url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        res.status(400).json({ success: false, error: "Invalid protocol" });
+        return;
+      }
+      const blocked = ["localhost", "127.0.0.1", "0.0.0.0", "::1", "169.254.", "10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31."];
+      if (blocked.some(h => parsed.hostname === h || parsed.hostname.startsWith(h))) {
+        res.status(400).json({ success: false, error: "Internal addresses are not allowed" });
+        return;
+      }
+    } catch {
+      res.status(400).json({ success: false, error: "Invalid base_url" });
+      return;
+    }
+
     // 构建 OpenAI-compatible 测试请求
     const payload = {
       model: p.id,
@@ -411,13 +428,12 @@ router.post("/models/:id/test", async (req: Request, res: Response) => {
       const latency = Date.now() - t0;
       res.status(502).json({
         success: false,
-        error: axiosErr.message,
+        error: "Provider test failed",
         data: {
           id,
           name: p.name,
           latency_ms: latency,
           status: axiosErr.response?.status,
-          response_body: axiosErr.response?.data,
         },
       });
     }
