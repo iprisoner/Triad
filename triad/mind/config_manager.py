@@ -13,11 +13,14 @@ class ConfigManager:
     _instance = None
     _config: Dict[str, Any] = {}
     
+    _lock = __import__('threading').Lock()
+
     def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._load()
-        return cls._instance
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+                cls._instance._load()
+            return cls._instance
     
     def _load(self):
         """从 .env 和 providers.json 加载配置"""
@@ -27,10 +30,17 @@ class ConfigManager:
             load_dotenv(dotenv_path)
         
         # 2. 基础配置
+        def _safe_int(env_key, default, min_val=1, max_val=65535):
+            try:
+                v = int(os.getenv(env_key, default))
+                return max(min_val, min(v, max_val))
+            except (ValueError, TypeError):
+                return int(default)
+
         self._config = {
             "triad_root": os.getenv("TRIAD_ROOT", str(Path.home() / ".triad")),
-            "gateway_port": int(os.getenv("GATEWAY_PORT", "18080")),
-            "llama_port": int(os.getenv("LLAMA_PORT", "18000")),
+            "gateway_port": _safe_int("GATEWAY_PORT", "18080"),
+            "llama_port": _safe_int("LLAMA_PORT", "18000"),
             "llama_model_path": os.getenv("LLAMA_MODEL_PATH", ""),
             "comfyui_host": os.getenv("COMFYUI_HOST", "host.docker.internal"),
             "comfyui_port": int(os.getenv("COMFYUI_PORT", "18188")),
@@ -64,7 +74,8 @@ class ConfigManager:
         return self._config.get("mcp", {}).get(name, "")
     
     def reload(self):
-        self._load()
+        with self._lock:
+            self._load()
 
 # 全局单例
 config = ConfigManager()
