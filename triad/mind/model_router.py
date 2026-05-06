@@ -627,7 +627,8 @@ class ModelRouter:
         call_fn: Optional[Callable[[ModelConfig, str], Coroutine[Any, Any, LLMResponse]]] = None,
     ) -> LLMResponse:
         """
-        v2.1 新增：直接指定 provider_id 执行，绕过策略路由。
+        v2.3.1 修复：直接指定 provider_id 执行，但**不再绕过熔断器**。
+        仍然通过 FallbackChain 执行，确保单点故障时自动降级。
 
         Args:
             provider_id: 注册表中的 provider id（如 "deepseek"）
@@ -638,16 +639,15 @@ class ModelRouter:
         if not provider or not provider.enabled:
             raise RouterConfigError(f"Provider {provider_id} not found or disabled")
 
+        # v2.3.1: 构造单点决策，但仍走 FallbackChain（不绕过熔断保护）
         cfg = _provider_to_config(provider)
-        caller = call_fn or self._default_call
-
-        t0 = time.perf_counter()
-        try:
-            response = await asyncio.wait_for(caller(cfg, prompt), timeout=cfg.timeout)
-            return response
-        except Exception as e:
-            logger.exception("execute_by_provider: %s failed", provider_id)
-            raise
+        decision = RoutingDecision(
+            primary=cfg,
+            secondary=None,
+            strategy=RouteStrategy.DEFAULT,
+            reasoning=f"Direct provider call: {provider_id}",
+        )
+        return await self.execute(decision, prompt)
 
     async def execute_pipeline(
         self,
