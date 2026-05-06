@@ -258,7 +258,7 @@ class AssetManager:
             existing_meta = await self._load_meta(dest.with_suffix(ext + ".meta.json"))
             if existing_meta:
                 version = existing_meta.version + 1
-                parent_id = existing_meta.asset_id
+                parent_id = f"{asset_id}_v{version - 1}"  # v2.3 修复：指向上一版本，而非自身
             # 备份旧文件
             backup_name = f"{asset_id}_v{version - 1}{ext}"
             backup_dest = dest_dir / backup_name
