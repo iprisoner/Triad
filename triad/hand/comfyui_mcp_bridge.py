@@ -364,6 +364,7 @@ class ComfyUIClient:
         self._session: Optional[aiohttp.ClientSession] = None
         self._ws_task: Optional[asyncio.Task] = None
         self._ws_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+        self._ws_queue_max_size = 1000  # v2.3.1: 防止OOM
         self._connected = False
         self._connect_lock = asyncio.Lock()  # v2.3.1-fix: ComfyUIClient needs its own lock
 
@@ -415,6 +416,20 @@ class ComfyUIClient:
             self._connected = True
             self._reconnect_delay = 3.0  # 重置退避
             logger.info(f"ComfyUI WebSocket connecting to {self.ws_url}")
+
+    async def _queue_cleanup_loop(self) -> None:
+        """v2.3.1: 定期清理_ws_queue，防止二进制帧堆积导致OOM。"""
+        while self._connected:
+            await asyncio.sleep(30)
+            # 如果队列超过阈值，丢弃最旧的一半
+            if self._ws_queue.qsize() > self._ws_queue_max_size:
+                drop_count = self._ws_queue.qsize() // 2
+                for _ in range(drop_count):
+                    try:
+                        self._ws_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                logger.warning(f"Dropped {drop_count} old websocket messages to prevent OOM")
 
     async def disconnect(self) -> None:
         self._connected = False
@@ -697,8 +712,9 @@ class MCPServer:
 
     async def _send(self, data: Dict[str, Any]) -> None:
         line = json.dumps(data, ensure_ascii=False) + "\n"
-        sys.stdout.write(line)
-        sys.stdout.flush()
+        async with self._stdout_lock:
+            sys.stdout.write(line)
+            sys.stdout.flush()
 
     async def send_notification(self, method: str, params: Dict[str, Any]) -> None:
         """向 Hermes Agent 发送主动通知（如进度更新）。"""
