@@ -10,6 +10,7 @@ interface UseWebSocketOptions {
   onError?: (event: Event) => void;
   reconnectInterval?: number;
   heartbeatInterval?: number;
+  maxReconnect?: number;
 }
 
 export function useWebSocket({
@@ -20,12 +21,15 @@ export function useWebSocket({
   onError,
   reconnectInterval = 3000,
   heartbeatInterval = 15000,
+  maxReconnect: maxReconnectProp,
 }: UseWebSocketOptions) {
   const [status, setStatus] = useState<WebSocketStatus>('CLOSED');
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const intentionallyClosed = useRef(false);
+  const reconnectCountRef = useRef(0);
+  const MAX_RECONNECT = maxReconnectProp ?? 10;
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -37,6 +41,7 @@ export function useWebSocket({
 
     ws.onopen = () => {
       setStatus('OPEN');
+      reconnectCountRef.current = 0;
       onOpen?.();
       if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
       heartbeatTimerRef.current = setInterval(() => {
@@ -63,9 +68,13 @@ export function useWebSocket({
       onClose?.(event);
 
       if (!intentionallyClosed.current && !event.wasClean) {
-        reconnectTimerRef.current = setTimeout(() => {
-          connect();
-        }, reconnectInterval);
+        reconnectCountRef.current += 1;
+        if (reconnectCountRef.current <= MAX_RECONNECT) {
+          const delay = Math.min(reconnectInterval * 1.5 ** reconnectCountRef.current, 30000);
+          reconnectTimerRef.current = setTimeout(() => {
+            connect();
+          }, delay);
+        }
       }
     };
 
