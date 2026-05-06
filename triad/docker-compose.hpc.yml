@@ -337,7 +337,7 @@ services:
       - "host.docker.internal:host-gateway"
 
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:18000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:18001/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -487,7 +487,7 @@ services:
       -np 4
 
     ports:
-      - "18000:8080"
+      - "18001:8080"
 
     volumes:
       # GGUF 模型文件挂载: 宿主机 ~/.triad/models/ → 容器 /models
