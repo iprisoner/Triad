@@ -277,7 +277,11 @@ class ContextAligner:
             logger.warning(
                 "ContextAligner: even facts exceed budget, truncating facts."
             )
-            return facts_text[:target_budget * 2]
+            # v2.3 修复：使用 tokenizer 级截断，而非字符切片
+            enc = self._get_encoder(self.ENCODING_MAP.get(target_config.vendor, self.default_encoding))
+            facts_tokens = enc.encode(facts_text)
+            truncated_tokens = facts_tokens[:target_budget]
+            return enc.decode(truncated_tokens)
 
         enc = self._get_encoder(self.ENCODING_MAP.get(target_config.vendor, self.default_encoding))
         tokens = enc.encode(source_context)
@@ -652,6 +656,16 @@ class ModelRouter:
     # 5.3 默认 HTTP 调用器（适配 OpenAI-compatible API）
     # ------------------------------------------------------------------
 
+    @property
+    def _http(self) -> httpx.AsyncClient:
+        """懒加载共享 httpx.AsyncClient（连接池复用）。"""
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(120.0, connect=10.0),
+                limits=httpx.Limits(max_keepalive_connections=20, max_connections=50),
+            )
+        return self._http_client
+
     async def _default_call(self, cfg: ModelConfig, prompt: str) -> LLMResponse:
         """
         通用 OpenAI-compatible API 调用器。
@@ -670,16 +684,16 @@ class ModelRouter:
         if cfg.capability.reasoning_effort == "high":
             payload["temperature"] = 0.2
 
-        async with httpx.AsyncClient(timeout=cfg.timeout) as client:
-            t0 = time.perf_counter()
-            resp = await client.post(
-                f"{cfg.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            latency = (time.perf_counter() - t0) * 1000
+        client = self._http
+        t0 = time.perf_counter()
+        resp = await client.post(
+            f"{cfg.base_url}/chat/completions",
+            headers=headers,
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        latency = (time.perf_counter() - t0) * 1000
 
         choice = data["choices"][0]
         usage = data.get("usage", {})
@@ -701,6 +715,12 @@ class ModelRouter:
     # ------------------------------------------------------------------
     # 5.4 角色感知路由 (Role-aware routing)
     # ------------------------------------------------------------------
+
+    async def close(self) -> None:
+        """关闭共享 HTTP 客户端，释放连接池。"""
+        if self._http_client is not None and not self._http_client.is_closed:
+            await self._http_client.aclose()
+            self._http_client = None
 
     def parse_role(self, raw_input: str) -> tuple[Optional[RoleConfig], str]:
         """
@@ -862,11 +882,23 @@ class ModelPreference:
 # 7. 工具函数 / 快捷入口 (v2.1)
 # ---------------------------------------------------------------------------
 
+# 常见厂商默认模型映射（v2.3 修复：provider.id 如 "deepseek" 不是 API model_id）
+_DEFAULT_MODEL_MAP: Dict[str, str] = {
+    "deepseek": "deepseek-chat",
+    "grok": "grok-beta",
+    "kimi": "moonshot-v1-8k",
+    "claude": "claude-3-sonnet-20240229",
+    "gemini": "gemini-1.5-pro",
+    "openai": "gpt-4o",
+    "qwen": "qwen2.5-7b",
+}
+
 def _provider_to_config(provider: ProviderConfig) -> ModelConfig:
     """将 ProviderConfig 转换为执行用的 ModelConfig"""
+    model_id = _DEFAULT_MODEL_MAP.get(provider.id, provider.id)
     return ModelConfig(
         vendor=provider.id,
-        model_id=provider.id,
+        model_id=model_id,
         base_url=provider.base_url,
         api_key=provider.api_key,
         capability=ModelCapability(
