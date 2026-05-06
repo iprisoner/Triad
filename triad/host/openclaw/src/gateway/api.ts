@@ -18,6 +18,7 @@ import * as os from "os";
 import axios, { AxiosError } from "axios";
 
 const router = Router();
+router.use(apiKeyAuth);
 
 // ---------------------------------------------------------------------------
 // 配置路径
@@ -53,6 +54,57 @@ type ProviderDict = Record<string, ProviderConfig>;
 // ---------------------------------------------------------------------------
 // 工具函数 — 读写 providers.json
 // ---------------------------------------------------------------------------
+
+// v2.3.1: 简单的API Key加密（AES-256-GCM，密钥来自环境变量）
+const ENCRYPTION_KEY = process.env.TRIAD_ENCRYPTION_KEY || '';
+
+function encryptApiKey(plain: string): string {
+  if (!ENCRYPTION_KEY || plain.startsWith('enc:') || !plain) return plain;
+  try {
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32)), iv);
+    let encrypted = cipher.update(plain, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    const authTag = cipher.getAuthTag().toString('hex');
+    return `enc:${iv.toString('hex')}:${authTag}:${encrypted}`;
+  } catch { return plain; }
+}
+
+function decryptApiKey(encrypted: string): string {
+  if (!encrypted || !encrypted.startsWith('enc:')) return encrypted;
+  if (!ENCRYPTION_KEY) return '';
+  try {
+    const parts = encrypted.split(':');
+    if (parts.length !== 4) return '';
+    const iv = Buffer.from(parts[1], 'hex');
+    const authTag = Buffer.from(parts[2], 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', Buffer.from(ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32)), iv);
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(parts[3], 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch { return ''; }
+}
+
+// v2.3.1: 基础API Key认证中间件
+function apiKeyAuth(req: Request, res: Response, next: NextFunction): void {
+  const exemptPaths = ['/api/system/status', '/api/models'];
+  if (exemptPaths.some(p => req.path === p || req.path.startsWith(p + '/'))) {
+    next();
+    return;
+  }
+  const apiKey = req.headers['x-api-key'] || req.headers.authorization?.replace('Bearer ', '');
+  const expectedKey = process.env.TRIAD_API_KEY;
+  if (!expectedKey) {
+    next(); // 未配置API Key则放行（开发模式）
+    return;
+  }
+  if (!apiKey || apiKey !== expectedKey) {
+    res.status(401).json({ success: false, error: 'Unauthorized' });
+    return;
+  }
+  next();
+}
 
 function loadProviders(): ProviderDict {
   if (!fs.existsSync(PROVIDERS_FILE)) {
