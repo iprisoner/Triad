@@ -164,6 +164,15 @@ ROLES: dict[str, RoleConfig] = {
         description="概念设计专家，ComfyUI 工作流大师",
     ),
 
+    "general": RoleConfig(
+        id="general",
+        name="通用助手",
+        icon="🤖",
+        description="通用对话与信息查询",
+        system_prompt="You are a helpful AI assistant. Answer concisely and accurately.",
+        tags=["general", "chat"],
+        temperature=0.7,
+    ),
     "devops_engineer": RoleConfig(
         id="devops_engineer",
         name="DevOps 工程师",
