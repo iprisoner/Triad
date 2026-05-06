@@ -257,9 +257,10 @@ triad/
 
 | 限制 | 说明 | 预计解决 |
 |------|------|---------|
-| 云端 API Key 需手动填入 | `.env` 模板需复制为 `.env` 并填入真实 Key | 用户操作，5分钟 |
-| CodeCurator 为占位符 | 代码评估当前返回满分 10.0，AST 静态检查（pylint/mypy）待接入 | v2.3 |
+| CodeCurator 为占位符 | 代码评估当前返回满分 10.0，AST 静态检查（pylint/mypy）待接入 | v2.4 |
 | 蜂群角色需手动在 roles.py 添加 | `@deep_research_swarm` 等需定义 `is_swarm=True` | 未来 Web UI 支持 |
+| 认证层为可选中间件 | 当前默认放行，需配置 TRIAD_API_KEY 环境变量启用 | v2.4 |
+| API Key 内存存储 | 前端不再持久化 API Key，刷新后需重新输入 | v2.4 接入后端加密存储 |
 
 ---
 
@@ -302,7 +303,7 @@ triad/
 
 - **文件数**: 79 个
 - **代码行**: ~16,500 行（Python/TypeScript/TSX/Bash/YAML）
-- **提交**: `3d8a96d` — Triad v2.3.1: Security patch — 53 bug fixes, 3-state circuit breaker, SSRF protection
+- **提交**: `3d8a96d` — Triad v2.3.1: Security patch — 58 bug fixes, 3-state circuit breaker, SSRF protection, API Key encryption
 
 ---
 
