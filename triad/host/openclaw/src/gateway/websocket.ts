@@ -53,7 +53,7 @@ export interface TaskStreamMessage {
 
 /** 客户端发送的消息 */
 export interface ClientMessage {
-  action: 'submit_task';
+  action: 'submit_task' | 'recover_tasks';
   prompt: string;
   strategy?: 'AUTO' | 'CREATIVE' | 'REASONING' | 'LONGFORM' | 'REVIEW';
   channel?: 'web' | 'wechat' | 'slack';
@@ -183,10 +183,21 @@ export class TaskWebSocketGateway {
   //  CORS 中间件
   // ───────────────────────────────────────────────────────────────────────
 
-  private corsMiddleware(_req: Request, res: Response, next: NextFunction): void {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  private corsMiddleware(req: Request, res: Response, next: NextFunction): void {
+    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'http://127.0.0.1:3000',
+    ];
+    const origin = req.headers.origin;
+    if (origin && allowedOrigins.includes(origin)) {
+      res.header('Access-Control-Allow-Origin', origin);
+    }
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('X-Content-Type-Options', 'nosniff');
+    res.header('X-Frame-Options', 'DENY');
     next();
   }
 
