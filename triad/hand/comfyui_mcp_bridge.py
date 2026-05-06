@@ -606,7 +606,7 @@ class MCPServer:
 
         while True:
             try:
-                line = await reader.readline()
+                line = await asyncio.wait_for(reader.readline(), timeout=30.0)
                 if not line:
                     break
                 line = line.decode("utf-8").strip()
@@ -1071,60 +1071,61 @@ class ComfyUIMCPBridge(MCPServer):
             t0 = time.time()
             last_heartbeat = t0
             heartbeat_interval = 5.0
-            while time.time() - t0 < timeout_sec:
-                await asyncio.sleep(1.0)
-                # 每 N 秒发送进度心跳通知
-                if time.time() - last_heartbeat >= heartbeat_interval:
-                    last_heartbeat = time.time()
-                    elapsed = time.time() - t0
+            try:
+                while time.time() - t0 < timeout_sec:
+                    await asyncio.sleep(1.0)
+                    # 每 N 秒发送进度心跳通知
+                    if time.time() - last_heartbeat >= heartbeat_interval:
+                        last_heartbeat = time.time()
+                        elapsed = time.time() - t0
+                        await self.send_notification("status/update", StatusUpdateBuilder.text(
+                            f"{tool_name} running... elapsed={elapsed:.0f}s / timeout={timeout_sec:.0f}s"
+                        ))
+                    history = await self.comfy.get_history(prompt_id)
+                    entry = history.get(prompt_id, {})
+                    outputs = entry.get("outputs", {})
+                    if outputs:
+                        for node_id, node_output in outputs.items():
+                            used_nodes.append(node_id)
+                            images = node_output.get("images", [])
+                            for img_info in images:
+                                filename = img_info["filename"]
+                                subfolder = img_info.get("subfolder", "")
+                                data = await self.comfy.download_image(filename, subfolder)
+                                local_path = self.output_dir / filename
+                                async with aiofiles.open(local_path, "wb") as f:
+                                    await f.write(data)
+                                result_files.append(str(local_path))
+                        break
+                else:
+                    # 超时：发送失败通知并抛出异常
                     await self.send_notification("status/update", StatusUpdateBuilder.text(
-                        f"{tool_name} running... elapsed={elapsed:.0f}s / timeout={timeout_sec:.0f}s"
+                        f"{tool_name} timed out after {timeout_sec}s"
                     ))
-                history = await self.comfy.get_history(prompt_id)
-                entry = history.get(prompt_id, {})
-                outputs = entry.get("outputs", {})
-                if outputs:
-                    for node_id, node_output in outputs.items():
-                        used_nodes.append(node_id)
-                        images = node_output.get("images", [])
-                        for img_info in images:
-                            filename = img_info["filename"]
-                            subfolder = img_info.get("subfolder", "")
-                            data = await self.comfy.download_image(filename, subfolder)
-                            local_path = self.output_dir / filename
-                            async with aiofiles.open(local_path, "wb") as f:
-                                await f.write(data)
-                            result_files.append(str(local_path))
-                    break
-            else:
-                # 超时：发送失败通知并抛出异常
-                await self.send_notification("status/update", StatusUpdateBuilder.text(
-                    f"{tool_name} timed out after {timeout_sec}s"
-                ))
-                raise TimeoutError(f"Workflow {tool_name} timed out after {timeout_sec}s")
+                    raise TimeoutError(f"Workflow {tool_name} timed out after {timeout_sec}s")
 
-            # 4. 存入资产库
-            stored_paths: List[str] = []
-            for idx, fp in enumerate(result_files):
-                aid = f"{asset_id_hint}_{idx}" if len(result_files) > 1 else asset_id_hint
-                meta = AssetMeta(
-                    asset_id=aid,
-                    asset_type=asset_type,
-                    format=Path(fp).suffix.lstrip("."),
-                    generation_params=generation_params,
-                )
-                stored = await self.asset_manager.store_asset(
-                    asset_id=aid,
-                    asset_type=asset_type,
-                    source_path=fp,
-                    meta=meta,
-                    copy=False,  # 直接移动
-                )
-                stored_paths.append(str(stored))
-
-            # 清理活跃任务
-            async with self._task_lock:
-                self._active_tasks.pop(prompt_id, None)
+                # 4. 存入资产库
+                stored_paths: List[str] = []
+                for idx, fp in enumerate(result_files):
+                    aid = f"{asset_id_hint}_{idx}" if len(result_files) > 1 else asset_id_hint
+                    meta = AssetMeta(
+                        asset_id=aid,
+                        asset_type=asset_type,
+                        format=Path(fp).suffix.lstrip("."),
+                        generation_params=generation_params,
+                    )
+                    stored = await self.asset_manager.store_asset(
+                        asset_id=aid,
+                        asset_type=asset_type,
+                        source_path=fp,
+                        meta=meta,
+                        copy=False,  # 直接移动
+                    )
+                    stored_paths.append(str(stored))
+            finally:
+                # 清理活跃任务（无论成功/超时/异常都执行，修复内存泄漏）
+                async with self._task_lock:
+                    self._active_tasks.pop(prompt_id, None)
 
             return {
                 "task_id": task_id,
