@@ -668,7 +668,9 @@ class RenderContext:
 # ---------------------------------------------------------------------------
 
 async def _demo_main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    # v2.3.1: 仅在直接运行文件时配置日志，避免覆盖全局配置
+    if __name__ == "__main__":
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
     scheduler = VRAMScheduler()
     await scheduler.start()
