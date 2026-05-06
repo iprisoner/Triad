@@ -769,7 +769,7 @@ class VRAMScheduler:
             True 表示推理可以安全开始，False 表示超时放弃
         """
         t0 = time.time()
-        async with self._llm_counter_lock:
+        async with self._llm_counter_cv:
             while self._state in (VRAMState.CPU_FALLBACK, VRAMState.RENDERING, VRAMState.RECOVERING):
                 elapsed = time.time() - t0
                 if elapsed >= timeout_sec:
@@ -802,7 +802,7 @@ class VRAMScheduler:
 
         减少引用计数，并通知所有等待 VRAM 切换的协程。
         """
-        async with self._llm_counter_lock:
+        async with self._llm_counter_cv:
             self._llm_inference_counter -= 1
             if self._llm_inference_counter < 0:
                 logger.warning("LLM 推理计数出现负值，归零修正")
@@ -818,9 +818,17 @@ class VRAMScheduler:
 
     async def acquire_render_memory(
         self,
-        task: RenderTask,
+        task: Union[str, RenderTask],
         timeout_sec: float = 60.0,
     ) -> "RenderContext":
+        # 兼容旧 API：如果传入字符串，自动包装为 RenderTask
+        if isinstance(task, str):
+            task = RenderTask(
+                task_id=task,
+                workflow_type="default",
+                estimated_vram_mb=20480,
+                priority=0,
+            )
         """
         申请进入渲染态（llama.cpp 版）。
 
@@ -837,7 +845,7 @@ class VRAMScheduler:
         async with self._vram_switch_lock:
             # ★★★ 地雷 1 修复：等待所有活跃 LLM 推理完成 ★★★
             t_wait = time.time()
-            async with self._llm_counter_lock:
+            async with self._llm_counter_cv:
                 while self._llm_inference_counter > 0:
                     logger.info(
                         f"VRAM 切换等待: {self._llm_inference_counter} 个 LLM 推理仍在运行，"
@@ -972,7 +980,6 @@ class VRAMScheduler:
 
         await self._set_state(VRAMState.IDLE)
         self._active_render = None
-        self._stats["renders_completed"] += 1
         await self._emit_progress(ctx.task.task_id, 1.0, "VRAM released, LLM GPU ready")
 
     # ------------------------------------------------------------------
@@ -981,7 +988,7 @@ class VRAMScheduler:
 
     async def acquire_render_context(
         self,
-        task: RenderTask,
+        task: Union[str, RenderTask],
         timeout_sec: float = 60.0,
     ) -> "RenderContext":
         """兼容旧版 API，等同于 acquire_render_memory。"""
@@ -1108,11 +1115,13 @@ class RenderContext:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         if not self._released:
             await self.scheduler.release_render_memory(self)
+        total_time = time.time() - self.acquired_at
+        self.scheduler._stats["total_render_time_sec"] += total_time
         if exc_type is not None:
             self.scheduler._stats["renders_failed"] += 1
             logger.error(f"Render task {self.task.task_id} failed: {exc}")
-        total_time = time.time() - self.acquired_at
-        self.scheduler._stats["total_render_time_sec"] += total_time
+        else:
+            self.scheduler._stats["renders_completed"] += 1
         logger.info(f"RenderContext exited for {self.task.task_id} ({total_time:.1f}s)")
 
 
