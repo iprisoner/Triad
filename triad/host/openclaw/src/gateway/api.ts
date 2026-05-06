@@ -185,8 +185,8 @@ router.get("/models", (req: Request, res: Response) => {
     }));
 
     res.json({ success: true, count: sanitized.length, data: sanitized });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: (err instanceof Error ? err.message : String(err)) });
   }
 });
 
@@ -235,8 +235,8 @@ router.post("/models", (req: Request, res: Response) => {
       success: true,
       data: { ...newProvider, api_key: newProvider.api_key ? "***" : "" },
     });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: (err instanceof Error ? err.message : String(err)) });
   }
 });
 
@@ -282,8 +282,8 @@ router.put("/models/:id", (req: Request, res: Response) => {
       success: true,
       data: { ...providers[id], api_key: providers[id].api_key ? "***" : "" },
     });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: (err instanceof Error ? err.message : String(err)) });
   }
 });
 
@@ -308,8 +308,8 @@ router.delete("/models/:id", (req: Request, res: Response) => {
     saveProviders(providers);
 
     res.json({ success: true, message: `Provider '${id}' deleted` });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: (err instanceof Error ? err.message : String(err)) });
   }
 });
 
@@ -341,8 +341,8 @@ router.post("/models/:id/toggle", (req: Request, res: Response) => {
         name: providers[id].name,
       },
     });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: (err instanceof Error ? err.message : String(err)) });
   }
 });
 
@@ -406,7 +406,7 @@ router.post("/models/:id/test", async (req: Request, res: Response) => {
             response.data?.choices?.[0]?.message?.content?.substring(0, 100) || "",
         },
       });
-    } catch (err: any) {
+    } catch (err) {
       const axiosErr = err as AxiosError;
       const latency = Date.now() - t0;
       res.status(502).json({
@@ -421,8 +421,8 @@ router.post("/models/:id/test", async (req: Request, res: Response) => {
         },
       });
     }
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: (err instanceof Error ? err.message : String(err)) });
   }
 });
 
