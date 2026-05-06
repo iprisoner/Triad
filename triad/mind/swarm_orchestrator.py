@@ -260,7 +260,23 @@ class SwarmExecutor:
                 return await self._execute_single_agent(agent, task)
 
         coros = [_run_with_task_limit(agent) for agent in task.agents]
-        gathered = await asyncio.gather(*coros, return_exceptions=True)
+        # v2.3.1: 添加整体超时防止永久阻塞
+        try:
+            gathered = await asyncio.wait_for(
+                asyncio.gather(*coros, return_exceptions=True),
+                timeout=task.timeout_sec if hasattr(task, 'timeout_sec') and task.timeout_sec else 300.0,
+            )
+        except asyncio.TimeoutError:
+            self.logger.error("[Swarm] 蜂群执行整体超时")
+            gathered = []
+            for _ in task.agents:
+                gathered.append(AgentResult(
+                    agent_name="unknown",
+                    content="",
+                    status="timeout",
+                    latency_ms=0,
+                    tokens_used=0,
+                ))
 
         results: List[AgentResult] = []
         for item in gathered:
