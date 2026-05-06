@@ -20,5 +20,8 @@ tiktoken>=0.7.0
 # GPU monitoring
 pynvml>=11.5.0
 
-# Data validation (optional but recommended)
-# pydantic>=2.0.0
+# YAML parsing (skill_crystallizer, MCP config)
+PyYAML>=6.0.0
+
+# JSON schema validation (model registry, config)
+pydantic>=2.0.0
