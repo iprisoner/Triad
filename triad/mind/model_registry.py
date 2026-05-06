@@ -3,6 +3,7 @@
 CRUD 操作 ~/.triad/memory/config/providers.json。
 支持无限添加模型，按 tags 路由。
 """
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -29,17 +30,23 @@ class ModelRegistry:
     PROVIDERS_FILE = CONFIG_DIR / "providers.json"
     
     def __init__(self):
+        import threading
         self.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         self._providers: Dict[str, ProviderConfig] = {}
+        self._lock = threading.Lock()
         self._load()
     
     def _load(self):
         """从 JSON 文件加载 providers"""
         if self.PROVIDERS_FILE.exists():
-            with open(self.PROVIDERS_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                for pid, pdict in data.items():
-                    self._providers[pid] = ProviderConfig(**pdict)
+            try:
+                with open(self.PROVIDERS_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    for pid, pdict in data.items():
+                        self._providers[pid] = ProviderConfig(**pdict)
+            except (json.JSONDecodeError, TypeError, KeyError) as exc:
+                print(f"[ModelRegistry] providers.json 损坏，重新初始化: {exc}")
+                self._init_defaults()
         else:
             # 首次加载：创建默认 providers（从 .env 读取）
             self._init_defaults()
@@ -129,36 +136,40 @@ class ModelRegistry:
         return self._providers.get(provider_id)
     
     def add(self, provider: ProviderConfig) -> bool:
-        if provider.id in self._providers:
-            return False
-        self._providers[provider.id] = provider
-        self._save()
-        return True
+        with self._lock:
+            if provider.id in self._providers:
+                return False
+            self._providers[provider.id] = provider
+            self._save()
+            return True
     
     def update(self, provider_id: str, updates: Dict[str, Any]) -> bool:
-        if provider_id not in self._providers:
-            return False
-        p = self._providers[provider_id]
-        for key, value in updates.items():
-            if hasattr(p, key):
-                setattr(p, key, value)
-        self._save()
-        return True
+        with self._lock:
+            if provider_id not in self._providers:
+                return False
+            p = self._providers[provider_id]
+            for key, value in updates.items():
+                if hasattr(p, key):
+                    setattr(p, key, value)
+            self._save()
+            return True
     
     def delete(self, provider_id: str) -> bool:
-        if provider_id not in self._providers:
-            return False
-        del self._providers[provider_id]
-        self._save()
-        return True
+        with self._lock:
+            if provider_id not in self._providers:
+                return False
+            del self._providers[provider_id]
+            self._save()
+            return True
     
     def toggle(self, provider_id: str) -> bool:
-        if provider_id not in self._providers:
-            return False
-        p = self._providers[provider_id]
-        p.enabled = not p.enabled
-        self._save()
-        return True
+        with self._lock:
+            if provider_id not in self._providers:
+                return False
+            p = self._providers[provider_id]
+            p.enabled = not p.enabled
+            self._save()
+            return True
     
     def find_by_strategy(self, strategy: str) -> List[ProviderConfig]:
         """根据策略查找匹配的 providers"""
