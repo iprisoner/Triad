@@ -1218,17 +1218,25 @@ class HermesOrchestrator:
             if has_vram_scheduler:
                 inference_ok = await self.vram_scheduler.begin_llm_inference(timeout_sec=5.0)
                 if not inference_ok:
-                    logger.warning("VRAM 正在切换中，推理请求排队超时，尝试直接执行...")
+                    logger.warning("VRAM 正在切换中，推理请求排队超时，取消推理")
+                    raise RuntimeError("VRAM 切换中，推理请求排队超时")
         except Exception as exc:
             logger.warning(f"begin_llm_inference 调用失败 (非致命): {exc}")
 
         try:
             # 优先检测真实 ModelRouter 的 execute(decision, prompt) 签名
-            if hasattr(self.router, "execute_with_role"):
-                # 真实 ModelRouter 使用 (decision, prompt) 顺序
-                result = self.router.execute(decision, prompt)
-            else:
-                # stub 使用 (task, decision) 顺序
+            import inspect
+            try:
+                sig = inspect.signature(self.router.execute)
+                params = list(sig.parameters.keys())
+                if len(params) >= 3 and params[1] == "decision":
+                    # 真实 ModelRouter: execute(self, decision, prompt)
+                    result = self.router.execute(decision, prompt)
+                else:
+                    # stub: execute(self, task, decision)
+                    result = self.router.execute(prompt, decision)
+            except (ValueError, TypeError):
+                # inspect 失败时回退到 stub 顺序
                 result = self.router.execute(prompt, decision)
             if asyncio.iscoroutine(result):
                 result = await result
