@@ -1208,6 +1208,7 @@ class HermesOrchestrator:
         完成后声明 end_llm_inference，防止 VRAM 切换切断活跃推理。
         """
         # 尝试获取 VRAM 调度器的推理锁（如果是本地模型则受保护，云端模型无害通过）
+        has_vram_scheduler = False
         try:
             has_vram_scheduler = (
                 hasattr(self, "vram_scheduler")
