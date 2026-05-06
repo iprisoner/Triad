@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://raw.githubusercontent.com/iprisoner/Triad/main/assets/logo.png" alt="Triad Logo" width="120">
 </p>
-<h1 align="center">Triad v2.3 🦞 Lobster Station</h1>
+<h1 align="center">Triad v2.3.1 🦞 Lobster Station (Security Patch)</h1>
 <p align="center">
   <strong>本地 AI 智能体操作系统 · 蜂群并发 · 显存跷跷板 · 动态路由</strong>
 </p>
@@ -48,7 +48,7 @@ Triad 是一款运行在**本地 WSL2 环境**中的三层架构 AI 智能体操
 
 ## ✨ 核心特性
 
-### 已生产就绪 (v2.3)
+### 已生产就绪 (v2.3.1)
 
 | 特性 | 说明 | 状态 |
 |------|------|------|
@@ -217,8 +217,8 @@ triad/
 
 | 文档 | 说明 |
 |------|------|
-| [技术白皮书](triad/docs/TECHNICAL_WHITEPAPER_v2.3.md) | 架构全景图、完成度详表、API 参考、数据流图示 |
-| [用户指南](triad/docs/USER_GUIDE_v2.3.md) | 角色速查表、30分钟上手教程、FAQ |
+| [技术白皮书](triad/docs/TECHNICAL_WHITEPAPER_v2.3.1.md) | 架构全景图、完成度详表、API 参考、数据流图示 |
+| [用户指南](triad/docs/USER_GUIDE_v2.3.1.md) | 角色速查表、30分钟上手教程、FAQ |
 | [续接指南](triad/docs/CONTINUATION_GUIDE.md) | 上下文恢复包（用于新 AI 助手续接） |
 
 ---
@@ -279,6 +279,17 @@ triad/
 - [x] 配方语义去重（适者生存，不野蛮繁殖）
 - [x] WebSocket 断连恢复（任务状态持久化）
 
+### v2.3.1 安全补丁 (2026-05-06)
+- [x] 熔断器三态重构（CLOSED/OPEN/HALF_OPEN）+ asyncio.Lock
+- [x] SSRF 防护（禁止内网地址探测）
+- [x] 错误响应脱敏（不暴露内部路径/命令）
+- [x] WebSocket 连接风暴防护（指数退避 + 最大重连次数）
+- [x] VRAM 调度器死锁修复（Condition+Lock 不可重入）
+- [x] 蜂群模式语法修复（IndentationError）
+- [x] 依赖漏洞升级（ws 8.17.1 / express 4.20.0 / axios 1.7.4 / vite 5.4.6）
+- [x] 路径遍历过滤（asset_id 字符白名单）
+- [x] WSL2 端口暴露限制（127.0.0.1）
+
 ### 下一步（v2.4）
 - [ ] Web UI 直接添加自定义角色（不用改代码）
 - [ ] CodeCurator 真实 AST 静态检查（pylint/mypy/pytest）
@@ -291,7 +302,7 @@ triad/
 
 - **文件数**: 79 个
 - **代码行**: ~16,500 行（Python/TypeScript/TSX/Bash/YAML）
-- **提交**: `3d8a96d` — Triad v2.3: Full production-ready release
+- **提交**: `3d8a96d` — Triad v2.3.1: Security patch — 53 bug fixes, 3-state circuit breaker, SSRF protection
 
 ---
 
@@ -312,5 +323,5 @@ Triad 是一个持续演进的社区项目。欢迎通过以下方式参与：
 ---
 
 <p align="center">
-  <strong>Triad v2.3 — 本地智能体操作系统，数据不出站，算力全掌控。</strong>
+  <strong>Triad v2.3.1 — 本地智能体操作系统，数据不出站，算力全掌控。</strong>
 </p>
