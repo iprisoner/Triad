@@ -18,6 +18,30 @@ import * as os from "os";
 import axios, { AxiosError } from "axios";
 
 const router = Router();
+
+// v2.3.1: 简单的 rate limiting（内存级，生产环境建议用 Redis）
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW_MS = 60_000; // 1分钟
+const RATE_LIMIT_MAX = 60; // 每IP每分钟60请求
+
+function rateLimit(req: Request, res: Response, next: NextFunction): void {
+  const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const record = rateLimitMap.get(clientIp);
+  if (!record || now > record.resetTime) {
+    rateLimitMap.set(clientIp, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    next();
+    return;
+  }
+  if (record.count >= RATE_LIMIT_MAX) {
+    res.status(429).json({ success: false, error: 'Rate limit exceeded' });
+    return;
+  }
+  record.count++;
+  next();
+}
+
+router.use(rateLimit);
 router.use(apiKeyAuth);
 
 // ---------------------------------------------------------------------------
