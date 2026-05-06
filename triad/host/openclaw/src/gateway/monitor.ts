@@ -63,7 +63,7 @@ export interface SystemStatus {
  */
 monitorRouter.get('/status', async (req, res) => {
     try {
-        const [gpu, containers, llama_server, cpu, memory] = await Promise.all([
+        const [gpuR, containersR, llamaR, cpuR, memR] = await Promise.allSettled([
             getGPUStatus(),
             getDockerContainers(),
             getLlamaStatus(),
