@@ -46,15 +46,24 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import httpx
 
 # 内部导入（在同包内，若实际部署路径不同请调整）
-from model_router import (
-    ContextAligner,
-    LLMResponse,
-    ModelConfig,
-    ModelRegistry,
-    ModelRouter,
-    ModelVendor,
-    RouteStrategy,
-)
+try:
+    from .model_router import (
+        ContextAligner,
+        LLMResponse,
+        ModelConfig,
+        ModelRegistry,
+        ModelRouter,
+        RouteStrategy,
+    )
+except ImportError:
+    from model_router import (
+        ContextAligner,
+        LLMResponse,
+        ModelConfig,
+        ModelRegistry,
+        ModelRouter,
+        RouteStrategy,
+    )
 
 logger = logging.getLogger("triad.novel_curator")
 
