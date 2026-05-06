@@ -42,6 +42,11 @@ fatal_exit() {
 # --- 确认函数 ---
 confirm() {
     local msg="$1"
+    # v2.3 修复：CI/CD 或管道环境自动跳过确认
+    if [[ -n "${CI:-}" ]] || [[ ! -t 0 ]] || [[ ! -t 1 ]]; then
+        log_info "Non-interactive mode detected, auto-confirming: ${msg}"
+        return 0
+    fi
     echo -ne "${YELLOW}[PROMPT]${NC} ${msg} [y/N] "
     read -r answer < /dev/tty || true
     [[ "$answer" =~ ^[Yy]$ ]]
@@ -406,7 +411,7 @@ if command -v nvidia-smi &>/dev/null; then
     NVIDIA_SMI_OUTPUT=$(nvidia-smi 2>/dev/null || true)
     if [[ -n "$NVIDIA_SMI_OUTPUT" ]]; then
         GPU_AVAILABLE=true
-        GPU_COUNT=$(echo "$NVIDIA_SMI_OUTPUT" | grep -c "^|\s*[0-9]\+\s*.*NVIDIA" || echo "0")
+        GPU_COUNT=$(echo "$NVIDIA_SMI_OUTPUT" | grep -cE "^\|[[:space:]]+[0-9]+[[:space:]]+.*NVIDIA" || echo "0")
         GPU_MODEL=$(echo "$NVIDIA_SMI_OUTPUT" | grep -oP "(NVIDIA|GeForce|Quadro|Tesla|Titan)\s+[A-Za-z0-9\-]+" | head -1 || echo "unknown")
         
         # 解析显存（MB）
