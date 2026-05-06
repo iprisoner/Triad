@@ -628,7 +628,7 @@ class SkillCrystallizer:
                         role_id=role_id.strip(),
                         system_prompt=system_prompt,
                         allowed_tools=allowed_tools,
-                        model_pref=meta.get("aggregation_mode", "default"),
+                        model_pref=meta.get("model_pref", "default"),
                         temperature=0.7,
                         position=idx,
                     )
@@ -640,7 +640,7 @@ class SkillCrystallizer:
                     role_id="default_role",
                     system_prompt=system_prompt,
                     allowed_tools=allowed_tools,
-                    model_pref=meta.get("aggregation_mode", "default"),
+                    model_pref=meta.get("model_pref", "default"),
                     temperature=0.7,
                     position=0,
                 )
