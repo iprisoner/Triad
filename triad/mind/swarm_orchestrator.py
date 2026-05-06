@@ -6,6 +6,7 @@ from typing import List, Optional, Dict, Any, Callable
 import asyncio
 import logging
 import time
+import re
 
 # ---------------------------------------------------------------------------
 # 外部依赖兼容层：真实环境导入失败时提供可独立运行的 Stub，避免崩溃
@@ -208,8 +209,6 @@ class SwarmExecutor:
         self.vram_scheduler = vram_scheduler
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.logger = logging.getLogger("swarm")
-        self.semaphore = asyncio.Semaphore(max_concurrent)
-        self.logger = logging.getLogger("swarm")
 
     async def _safe_report(
         self,
@@ -370,11 +369,13 @@ class SwarmExecutor:
                 )
 
                 # ★★★ 地雷 1 修复：声明开始本地 LLM 推理 ★★★
-                has_vram_scheduler = (
-                    self.vram_scheduler is not None
-                    and hasattr(self.vram_scheduler, "begin_llm_inference")
-                )
-                if has_vram_scheduler:
+                has_vram_scheduler = False
+                try:
+                    has_vram_scheduler = (
+                        self.vram_scheduler is not None
+                        and hasattr(self.vram_scheduler, "begin_llm_inference")
+                    )
+                    if has_vram_scheduler:
                     try:
                         inference_ok = await self.vram_scheduler.begin_llm_inference(timeout_sec=5.0)
                         if not inference_ok:
