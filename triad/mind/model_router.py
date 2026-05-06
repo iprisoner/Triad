@@ -329,7 +329,13 @@ class ContextAligner:
 
 class FallbackChain:
     """
-    主模型失败时的自动降级机制。
+    主模型失败时的自动降级机制（v2.3 重构：三态熔断器 + 协程安全）。
+
+    状态机:
+        CLOSED  → 计数失败 → 达到阈值 → OPEN
+        OPEN    → 超时到期 → HALF_OPEN（只允许单探测）
+        HALF_OPEN → 探测成功 → CLOSED（清零计数）
+        HALF_OPEN → 探测失败 → OPEN（重置超时）
     """
 
     def __init__(
@@ -341,8 +347,10 @@ class FallbackChain:
         self.registry = registry
         self.aligner = aligner
         self.health_check_interval = health_check_interval
+        self._lock = asyncio.Lock()
         self._failure_counts: Dict[str, int] = {}
         self._circuit_open: Dict[str, float] = {}
+        self._circuit_half_open: Dict[str, bool] = {}  # v2.3 新增：半开状态标记
         self._circuit_threshold = 5
         self._circuit_timeout = 120.0
 
@@ -372,7 +380,8 @@ class FallbackChain:
         for cfg in candidates:
             if cfg is None:
                 continue
-            if not self._is_healthy(cfg):
+            healthy = await self._is_healthy(cfg)
+            if not healthy:
                 logger.warning("FallbackChain: %s is circuit-open, skipping.", cfg.model_id)
                 continue
 
@@ -388,52 +397,79 @@ class FallbackChain:
                         call_fn(cfg, prompt),
                         timeout=cfg.timeout,
                     )
-                    self._failure_counts[cfg.model_id] = 0
+                    # 成功：在半开状态则移回 CLOSED，清零计数
+                    async with self._lock:
+                        self._failure_counts[cfg.model_id] = 0
+                        self._circuit_half_open.pop(cfg.model_id, None)
                     return response
                 except asyncio.TimeoutError as e:
                     last_exception = e
-                    logger.warning("FallbackChain: %s timeout on attempt %d", cfg.model_id, attempt + 1)
-                    await asyncio.sleep(1.5 ** attempt)
+                    if attempt < cfg.retry_times:
+                        logger.warning("FallbackChain: %s timeout on attempt %d", cfg.model_id, attempt + 1)
+                        await asyncio.sleep(1.5 ** attempt)
+                    else:
+                        break
                 except httpx.HTTPStatusError as e:
                     last_exception = e
                     if e.response.status_code == 429:
                         logger.warning("FallbackChain: %s rate limited", cfg.model_id)
-                        await asyncio.sleep(2 ** attempt)
+                        if attempt < cfg.retry_times:
+                            await asyncio.sleep(2 ** attempt)
+                        else:
+                            break
                     elif e.response.status_code >= 500:
                         logger.warning("FallbackChain: %s server error", cfg.model_id)
-                        await asyncio.sleep(1.5 ** attempt)
+                        if attempt < cfg.retry_times:
+                            await asyncio.sleep(1.5 ** attempt)
+                        else:
+                            break
                     else:
+                        # 客户端错误 (4xx) 不触发熔断，立即跳出
                         break
                 except Exception as e:
                     last_exception = e
                     logger.exception("FallbackChain: %s unexpected error", cfg.model_id)
                     break
 
-            self._record_failure(cfg.model_id)
+            await self._record_failure(cfg.model_id)
 
         raise FallbackExhaustedError(
             f"All fallback candidates exhausted. Last error: {last_exception}"
         ) from last_exception
 
-    def _is_healthy(self, cfg: ModelConfig) -> bool:
-        now = time.time()
-        if cfg.model_id in self._circuit_open:
-            open_time = self._circuit_open[cfg.model_id]
-            if now - open_time < self._circuit_timeout:
+    async def _is_healthy(self, cfg: ModelConfig) -> bool:
+        async with self._lock:
+            now = time.time()
+            if cfg.model_id in self._circuit_open:
+                open_time = self._circuit_open[cfg.model_id]
+                if now - open_time < self._circuit_timeout:
+                    return False
+                # 超时到期：进入 HALF_OPEN（单探测模式）
+                del self._circuit_open[cfg.model_id]
+                self._circuit_half_open[cfg.model_id] = True
+                logger.info("FallbackChain: %s circuit half-open, allowing single probe.", cfg.model_id)
+            elif cfg.model_id in self._circuit_half_open:
+                # 半开状态下：只允许一个探测请求通过
+                # 如果已经有探测在进行，返回 False
+                # 简化实现：半开状态标记存在时，第一个调用者清除标记并允许通过
+                # 后续调用者在锁保护下看到标记已被清除，返回 False
+                if self._circuit_half_open.get(cfg.model_id, False):
+                    self._circuit_half_open[cfg.model_id] = False  # 标记为"探测中"
+                    return True
                 return False
-            del self._circuit_open[cfg.model_id]
-            logger.info("FallbackChain: %s circuit half-open, allowing probe.", cfg.model_id)
-        return cfg.healthy
+            return cfg.healthy
 
-    def _record_failure(self, model_id: str) -> None:
-        self._failure_counts[model_id] = self._failure_counts.get(model_id, 0) + 1
-        if self._failure_counts[model_id] >= self._circuit_threshold:
-            self._circuit_open[model_id] = time.time()
-            logger.error(
-                "FallbackChain: %s circuit opened after %d failures.",
-                model_id,
-                self._failure_counts[model_id],
-            )
+    async def _record_failure(self, model_id: str) -> None:
+        async with self._lock:
+            self._failure_counts[model_id] = self._failure_counts.get(model_id, 0) + 1
+            if self._failure_counts[model_id] >= self._circuit_threshold:
+                self._circuit_open[model_id] = time.time()
+                self._circuit_half_open.pop(model_id, None)
+                logger.error(
+                    "FallbackChain: %s circuit opened after %d failures.",
+                    model_id,
+                    self._failure_counts[model_id],
+                )
 
     async def health_probe(self, cfg: ModelConfig) -> bool:
         cfg.last_health_check = time.time()
