@@ -85,7 +85,7 @@ monitorRouter.get('/status', async (req, res) => {
         console.error('[monitor] /status 聚合失败:', error);
         res.status(500).json({
             success: false,
-            error: error instanceof Error ? error.message : String(error),
+            error: 'System status temporarily unavailable',
         });
     }
 });
@@ -176,7 +176,7 @@ async function getLlamaStatus(): Promise<LlamaServerStatus> {
     try {
         // 1) 先探测 /health 端点确认存活
         const { stdout } = await execAsync(
-            'curl -s http://localhost:18000/health',
+            `curl -s http://\${process.env.LLAMA_HOST || 'localhost'}:\${process.env.LLAMA_PORT || '18000'}/health`,
             { timeout: 3000 },
         );
         const healthData = JSON.parse(stdout);
@@ -192,7 +192,7 @@ async function getLlamaStatus(): Promise<LlamaServerStatus> {
 
         try {
             const { stdout: slotStdout } = await execAsync(
-                'curl -s http://localhost:18000/slots',
+                `curl -s http://\${process.env.LLAMA_HOST || 'localhost'}:\${process.env.LLAMA_PORT || '18000'}/slots`,
                 { timeout: 3000 },
             );
             const slotsData = JSON.parse(slotStdout);
