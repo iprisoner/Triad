@@ -22,11 +22,13 @@ class RoleConfig:
     id: str
     name: str
     system_prompt: str
-    model_pref: str                     # 优先路由策略：CREATIVE / REASONING / LONGFORM / CHAT / REVIEW
-    allowed_tools: List[str]            # 允许调用的 MCP 工具 / 内置工具
+    model_pref: str = "CHAT"            # 优先路由策略：CREATIVE / REASONING / LONGFORM / CHAT / REVIEW
+    allowed_tools: List[str] = field(default_factory=list)  # 允许调用的 MCP 工具 / 内置工具
     temperature: float = 0.7
     max_tokens: int = 4096
     description: str = ""               # 一句话描述，用于前端展示
+    icon: str = ""                      # 角色图标，前端展示用 (v2.3.1-fix)
+    tags: List[str] = field(default_factory=list)  # 角色标签 (v2.3.1-fix)
 
 
 # ---------------------------------------------------------------------------
