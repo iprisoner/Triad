@@ -130,14 +130,14 @@ services:
     # 原生 Linux 建议 uncomment: command 前缀添加 numactl --cpunodebind=0 --membind=0
 
     # deploy:
-      # resources:
-        # limits:
-          # 限制在 Node 0 本地内存 (约 64GB 总量，分配 16GB 给 Gateway)
-          # memory: 16G
-          # 禁用 swap 避免 IO 抖动穿透到 WSL2 VHD
-          # swap: 0
-        # reservations:
-          memory: 4G
+    #   resources:
+    #     limits:
+    #       限制在 Node 0 本地内存 (约 64GB 总量，分配 16GB 给 Gateway)
+    #       memory: 16G
+    #       禁用 swap 避免 IO 抖动穿透到 WSL2 VHD
+    #       swap: 0
+    #     reservations:
+    #       memory: 4G
 
     # 特权与能力 — 仅保留 ClawPod 管理所需的最小能力集
     cap_add:
