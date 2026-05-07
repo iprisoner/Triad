@@ -71,6 +71,12 @@ monitorRouter.get('/status', async (req, res) => {
             getMemoryStatus(),
         ]);
 
+        const gpu = gpuR.status === "fulfilled" ? gpuR.value : { name: 'GPU 不可用', memoryUsed: 0, memoryTotal: 1, memoryPercent: 0, gpuUtilization: 0, temperature: 0 };
+        const containers = containersR.status === "fulfilled" ? containersR.value : [];
+        const llama_server = llamaR.status === "fulfilled" ? llamaR.value : { running: false, mode: 'unknown' as const, speed: 0 };
+        const cpu = cpuR.status === "fulfilled" ? cpuR.value : { usage: 0, cores: 0 };
+        const memory = memR.status === "fulfilled" ? memR.value : { used: 0, total: 0, percent: 0 };
+
         const status: SystemStatus = {
             timestamp: new Date().toISOString(),
             gpu,
