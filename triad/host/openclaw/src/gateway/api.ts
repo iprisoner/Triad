@@ -15,7 +15,8 @@ import { Router, Request, Response, NextFunction } from "express";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import axios, { AxiosError } from "axios";
+const axios = require("axios");
+const { AxiosError } = axios;
 import crypto from "crypto";
 
 const router = Router();
