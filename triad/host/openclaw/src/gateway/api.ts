@@ -11,11 +11,12 @@
  * POST   /api/models/:id/test    — 测试连接（发送 "Hello"）
  */
 
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import axios, { AxiosError } from "axios";
+import crypto from "crypto";
 
 const router = Router();
 
