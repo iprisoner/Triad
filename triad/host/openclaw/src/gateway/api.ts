@@ -502,7 +502,7 @@ router.post("/models/:id/test", async (req: Request, res: Response) => {
         },
       });
     } catch (err) {
-      const axiosErr = err as AxiosError;
+      const axiosErr = err as axios.AxiosError;
       const latency = Date.now() - t0;
       res.status(502).json({
         success: false,
