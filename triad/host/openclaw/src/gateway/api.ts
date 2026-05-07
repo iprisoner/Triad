@@ -15,8 +15,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-const axios = require("axios");
-const { AxiosError } = axios;
+import axios from "axios";
 import crypto from "crypto";
 
 const router = Router();
@@ -502,7 +501,7 @@ router.post("/models/:id/test", async (req: Request, res: Response) => {
         },
       });
     } catch (err) {
-      const axiosErr = err as axios.AxiosError;
+      const axiosErr = err as any;
       const latency = Date.now() - t0;
       res.status(502).json({
         success: false,
