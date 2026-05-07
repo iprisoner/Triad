@@ -138,7 +138,7 @@ fix_all() {
     for p in httpx aiohttp tiktoken pynvml python-dotenv websockets aiofiles; do
         python3 -c "import $p" 2>/dev/null || {
             fix "安装 Python 包: $p"
-            pip3 install "$p" 2>/dev/null || pip install "$p"
+            pip3 install "$p" || pip install "$p"
         }
     done
 
