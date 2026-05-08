@@ -6,6 +6,7 @@ CRUD 操作 ~/.triad/memory/config/providers.json。
 import asyncio
 import json
 import os
+import stat
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, asdict
@@ -40,6 +41,12 @@ class ModelRegistry:
         """从 JSON 文件加载 providers"""
         if self.PROVIDERS_FILE.exists():
             try:
+                # 检查文件权限
+                file_stat = os.stat(self.PROVIDERS_FILE)
+                mode = stat.S_IMODE(file_stat.st_mode)
+                if mode & (stat.S_IRWXG | stat.S_IRWXO):
+                    print(f"[SECURITY WARNING] providers.json has overly permissive permissions ({oct(mode)}). "
+                          f"Run: chmod 600 {self.PROVIDERS_FILE}")
                 with open(self.PROVIDERS_FILE, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     for pid, pdict in data.items():
@@ -116,10 +123,23 @@ class ModelRegistry:
         self._save()
     
     def _save(self):
-        """保存到 JSON 文件"""
+        """保存到 JSON 文件（原子写入 + 安全权限）"""
         data = {pid: asdict(p) for pid, p in self._providers.items()}
-        with open(self.PROVIDERS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        # 原子写入：先写临时文件，再重命名
+        tmp_file = self.PROVIDERS_FILE.with_suffix('.tmp')
+        try:
+            with open(tmp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            # 设置安全权限（仅所有者可读写）
+            os.chmod(tmp_file, stat.S_IRUSR | stat.S_IWUSR)
+            # 原子重命名
+            os.replace(tmp_file, self.PROVIDERS_FILE)
+        except Exception as exc:
+            if tmp_file.exists():
+                tmp_file.unlink()
+            raise RuntimeError(f"Failed to save providers: {exc}") from exc
     
     # CRUD 操作
     def list(self, tag_filter: Optional[str] = None, enabled_only: bool = True) -> List[ProviderConfig]:

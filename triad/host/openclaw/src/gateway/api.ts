@@ -80,48 +80,66 @@ type ProviderDict = Record<string, ProviderConfig>;
 // 工具函数 — 读写 providers.json
 // ---------------------------------------------------------------------------
 
-// v2.3.1: 简单的API Key加密（AES-256-GCM，密钥来自环境变量）
 const ENCRYPTION_KEY = process.env.TRIAD_ENCRYPTION_KEY || '';
+const PBKDF2_ITERATIONS = 100000;
+const PBKDF2_KEYLEN = 32;
+const PBKDF2_DIGEST = 'sha256';
+
+function _deriveKey(): Buffer {
+  if (!ENCRYPTION_KEY) {
+    throw new Error('TRIAD_ENCRYPTION_KEY not configured');
+  }
+  // 使用密钥哈希作为固定 salt（确保同一密钥始终派生同一密钥）
+  const salt = crypto.createHash('sha256').update(ENCRYPTION_KEY).digest().slice(0, 16);
+  return crypto.pbkdf2Sync(ENCRYPTION_KEY, salt, PBKDF2_ITERATIONS, PBKDF2_KEYLEN, PBKDF2_DIGEST);
+}
 
 function encryptApiKey(plain: string): string {
   if (!ENCRYPTION_KEY || plain.startsWith('enc:') || !plain) return plain;
   try {
+    const key = _deriveKey();
     const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv('aes-256-gcm', Buffer.from(ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32)), iv);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
     let encrypted = cipher.update(plain, 'utf8', 'hex');
     encrypted += cipher.final('hex');
     const authTag = cipher.getAuthTag().toString('hex');
     return `enc:${iv.toString('hex')}:${authTag}:${encrypted}`;
-  } catch { return plain; }
+  } catch (err) {
+    throw new Error(`Failed to encrypt API key: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 function decryptApiKey(encrypted: string): string {
   if (!encrypted || !encrypted.startsWith('enc:')) return encrypted;
-  if (!ENCRYPTION_KEY) return '';
+  if (!ENCRYPTION_KEY) throw new Error('TRIAD_ENCRYPTION_KEY not configured');
   try {
     const parts = encrypted.split(':');
-    if (parts.length !== 4) return '';
+    if (parts.length !== 4) throw new Error('Invalid encrypted format');
     const iv = Buffer.from(parts[1], 'hex');
     const authTag = Buffer.from(parts[2], 'hex');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', Buffer.from(ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32)), iv);
+    const key = _deriveKey();
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(authTag);
     let decrypted = decipher.update(parts[3], 'hex', 'utf8');
     decrypted += decipher.final('utf8');
     return decrypted;
-  } catch { return ''; }
+  } catch (err) {
+    throw new Error(`Failed to decrypt API key: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
-// v2.3.1: 基础API Key认证中间件
 function apiKeyAuth(req: Request, res: Response, next: NextFunction): void {
-  const exemptPaths = ['/api/system/status', '/api/models'];
-  if (exemptPaths.some(p => req.path === p || req.path.startsWith(p + '/'))) {
+  // 仅豁免特定的 GET 请求路径
+  const exemptGetPaths = ['/api/system/status', '/api/models'];
+  if (req.method === 'GET' && exemptGetPaths.includes(req.path)) {
     next();
     return;
   }
   const apiKey = req.headers['x-api-key'] || req.headers.authorization?.replace('Bearer ', '');
   const expectedKey = process.env.TRIAD_API_KEY;
   if (!expectedKey) {
-    next(); // 未配置API Key则放行（开发模式）
+    // 未配置 API Key：拒绝所有非豁免请求（生产安全模式）
+    res.status(401).json({ success: false, error: 'TRIAD_API_KEY not configured on server' });
     return;
   }
   if (!apiKey || apiKey !== expectedKey) {

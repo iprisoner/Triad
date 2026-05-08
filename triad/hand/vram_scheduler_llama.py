@@ -45,6 +45,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -268,6 +269,11 @@ class NVMLMonitor:
 # CpuAffinityManager（Docker 容器 CPU 亲和性动态管理器）
 # ---------------------------------------------------------------------------
 
+# Docker 容器名称验证正则（仅允许安全字符）
+CONTAINER_NAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]*$')
+CONTAINER_ID_RE = re.compile(r'^[a-f0-9]{64}$')
+
+
 class CpuAffinityManager:
     """
     Docker 容器 CPU 亲和性动态管理器。
@@ -296,9 +302,16 @@ class CpuAffinityManager:
     CPU_FALLBACK_THREADS: int = 32
 
     def __init__(self, container_name: Optional[str] = None):
-        self.container_name = container_name or os.getenv(
-            "LLAMA_CONTAINER_NAME", "triad-llama-server"
-        )
+        raw_name = container_name or os.getenv("LLAMA_CONTAINER_NAME", "triad-llama-server")
+        # 验证容器名称安全性
+        if raw_name and CONTAINER_NAME_RE.match(raw_name):
+            self.container_name = raw_name
+        else:
+            logger.warning(
+                f"CpuAffinityManager: invalid container name '{raw_name}', "
+                f"using default. Only [a-zA-Z0-9_.-] allowed."
+            )
+            self.container_name = "triad-llama-server"
         self.container_id: Optional[str] = None
         self.has_docker: bool = False
         self._check_docker_access()
@@ -312,14 +325,22 @@ class CpuAffinityManager:
                 text=True,
                 timeout=5,
             )
-            self.container_id = result.stdout.strip() or None
-            self.has_docker = bool(self.container_id)
-            if self.has_docker:
+            raw_id = result.stdout.strip()
+            # 验证 container_id 格式（应为 64 位十六进制）
+            if raw_id and CONTAINER_ID_RE.match(raw_id):
+                self.container_id = raw_id
+                self.has_docker = True
                 logger.info(
                     f"CpuAffinityManager: found container {self.container_name} "
                     f"(id={self.container_id[:12]})"
                 )
+            elif raw_id:
+                logger.warning(f"CpuAffinityManager: invalid container id format, skipping docker mode")
+                self.container_id = None
+                self.has_docker = False
             else:
+                self.container_id = None
+                self.has_docker = False
                 logger.info(
                     f"CpuAffinityManager: container {self.container_name} not found, "
                     f"running in host mode (no docker updates)"

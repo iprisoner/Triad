@@ -383,8 +383,16 @@ install_docker() {
         # 添加 Docker 官方 GPG 密钥（通过国内镜像）
         info "添加 Docker GPG 密钥 ..."
         sudo install -m 0755 -d /etc/apt/keyrings
-        curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg || \
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        # 下载 Docker GPG 密钥到临时文件
+        local docker_gpg_tmp="/tmp/docker.gpg.tmp.$$.$(date +%s)"
+        if curl -fsSL -o "${docker_gpg_tmp}" https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg 2>/dev/null && [ -s "${docker_gpg_tmp}" ]; then
+            sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg < "${docker_gpg_tmp}"
+        elif curl -fsSL -o "${docker_gpg_tmp}" https://download.docker.com/linux/ubuntu/gpg 2>/dev/null && [ -s "${docker_gpg_tmp}" ]; then
+            sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg < "${docker_gpg_tmp}"
+        else
+            fatal "无法下载 Docker GPG 密钥（两个镜像源均失败）"
+        fi
+        rm -f "${docker_gpg_tmp}"
         sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
         # 添加 Docker APT 仓库
@@ -424,11 +432,26 @@ install_nvidia_container_toolkit() {
         info "开始安装 nvidia-container-toolkit ..."
         # 添加 NVIDIA Container Toolkit 仓库
         info "添加 NVIDIA Container Toolkit 仓库 ..."
-        curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | \
-            sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-        curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
-            sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
-            sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+        # 下载 NVIDIA GPG 密钥到临时文件
+        local nvidia_gpg_tmp="/tmp/nvidia.gpg.tmp.$$.$(date +%s)"
+        if curl -fsSL -o "${nvidia_gpg_tmp}" https://nvidia.github.io/libnvidia-container/gpgkey 2>/dev/null && [ -s "${nvidia_gpg_tmp}" ]; then
+            sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg < "${nvidia_gpg_tmp}"
+        else
+            rm -f "${nvidia_gpg_tmp}"
+            fatal "无法下载 NVIDIA GPG 密钥"
+        fi
+        rm -f "${nvidia_gpg_tmp}"
+
+        # 下载 NVIDIA 仓库列表到临时文件
+        local nvidia_list_tmp="/tmp/nvidia.list.tmp.$$.$(date +%s)"
+        if curl -fsSL -o "${nvidia_list_tmp}" https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list 2>/dev/null && [ -s "${nvidia_list_tmp}" ]; then
+            sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' "${nvidia_list_tmp}" | \
+                sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list > /dev/null
+        else
+            rm -f "${nvidia_list_tmp}"
+            fatal "无法下载 NVIDIA 仓库列表"
+        fi
+        rm -f "${nvidia_list_tmp}"
 
         run_cmd "更新 apt 索引（NVIDIA 仓库）" sudo apt-get update
         run_cmd "安装 nvidia-container-toolkit" sudo apt-get install -y nvidia-container-toolkit
