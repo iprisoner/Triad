@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
   Database,
@@ -157,7 +157,7 @@ const CategoryTabBar: React.FC<CategoryTabBarProps> = ({
   active,
   onSelect,
 }) => {
-  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const scroll = (dir: number) => {
     if (scrollRef.current) {
@@ -316,7 +316,7 @@ interface ToastProps {
 }
 
 const Toast: React.FC<ToastProps> = ({ toast, onDismiss }) => {
-  React.useEffect(() => {
+  useEffect(() => {
     if (toast.visible) {
       const timer = setTimeout(onDismiss, 2500);
       return () => clearTimeout(timer);
