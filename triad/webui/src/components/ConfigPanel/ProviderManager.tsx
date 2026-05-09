@@ -609,7 +609,7 @@ const ProviderManager: React.FC<{ initialProviders?: Provider[] }> = ({ initialP
         });
         const latency = Math.round(performance.now() - start);
         if (res.ok) {
-          const data = await res.json();
+          await res.json();
           showToast(`连接成功，延迟 ${latency}ms`, 'success');
         } else {
           showToast(`连接失败：HTTP ${res.status} ${res.statusText}`, 'error');

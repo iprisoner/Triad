@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Activity, Server, Cpu, HardDrive, Thermometer, Zap } from 'lucide-react';
 import clsx from 'clsx';
 
