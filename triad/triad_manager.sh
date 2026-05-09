@@ -863,9 +863,15 @@ cmd_install() {
 # 获取 .env 中的变量（如果存在）
 load_env() {
     if [[ -f "${ENV_FILE}" ]]; then
-        # shellcheck source=/dev/null
         set -a
-        source "${ENV_FILE}"
+        while IFS='=' read -r key val; do
+            [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+            # 跳过与 bash 内置 readonly 变量冲突的赋值（UID, EUID, PPID 等）
+            if declare -p "$key" 2>/dev/null | grep -q "readonly"; then
+                continue
+            fi
+            eval "$key=$val"
+        done < "${ENV_FILE}"
         set +a
     fi
 }
