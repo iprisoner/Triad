@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://raw.githubusercontent.com/iprisoner/Triad/main/assets/logo.png" alt="Triad Logo" width="120">
 </p>
-<h1 align="center">Triad v2.3.1 🦞 Lobster Station (Security Patch)</h1>
+<h1 align="center">Triad v3.0.0 🦞 Lobster Station (OpenClaw Native)</h1>
 <p align="center">
   <strong>本地 AI 智能体操作系统 · 蜂群并发 · 显存跷跷板 · 动态路由</strong>
 </p>
@@ -23,32 +23,39 @@ Triad 是一款运行在**本地 WSL2 环境**中的三层架构 AI 智能体操
 
 ---
 
-## 🏗️ 系统架构
+## 🏗️ 系统架构 (v3.0)
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         🦞 浏览器多标签工作台                                  │
-│            [🦞 龙虾控制台]  [📊 系统监控]                                      │
-│              React 18 + Vite + Tailwind + shadcn/ui                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                         OpenClaw Gateway (Node.js/TS)                          │
-│     WebSocket Server (:8080) · REST API (/api/models) · 系统探针 (/status)    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                         Hermes 认知编排层 (Python 3.10+)                        │
-│  动态角色路由 · 蜂群调度(SwarmExecutor) · 技能进化(SkillCrystallizer)           │
-│  动态评估(小说/代码/bypass) · 本地推理路由                                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                         本地推理执行层                                        │
-│  llama-server (Docker, -ngl 99↔0 跷跷板)  本地推理                            │
-│  VRAMScheduler (读者-写者锁 · NUMA 亲和性调度)                                 │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│  🦞 WebUI (TriadPanel.tsx)                                           │
+│  左边聊天 · 右边监控/配置 · 纯前端 · 连 OpenClaw 原生 WS               │
+│  React 18 + Vite + Tailwind + shadcn/ui                              │
+├──────────────────────────────────────────────────────────────────────┤
+│  OpenClaw Gateway (原生，零改动)                                       │
+│  会话管理 · 认证授权 · 消息路由 · 断连恢复 · 工具调用                   │
+├──────────────────────────────────────────────────────────────────────┤
+│  Hermes Skill (Python 3.10+)                                         │
+│  hermes_skill.py: CLI + REST API                                     │
+│  ├── 模型路由 (ModelRouter)                                          │
+│  ├── 蜂群调度 (SwarmExecutor)                                        │
+│  ├── 技能进化 (SkillCrystallizer)                                    │
+│  ├── 小说评估 (NovelCurator)                                         │
+│  └── 配置管理 (ConfigManager)                                        │
+├──────────────────────────────────────────────────────────────────────┤
+│  本地推理执行层                                                        │
+│  llama-server (Docker, -ngl 99↔0) · ComfyUI (18188)                  │
+│  VRAMScheduler (读者-写者锁 · NUMA 亲和性)                             │
+└──────────────────────────────────────────────────────────────────────┘
 ```
+
+> **v3.0 核心变化**: 不再自建 Gateway。Triad 退化（升级）为 OpenClaw 的能力插件。
+> 模型通过 OpenClaw 原生工具（exec/gateway/write/edit）直接改配置、管基础设施。
 
 ---
 
 ## ✨ 核心特性
 
-### 已生产就绪 (v2.3.1)
+### 已生产就绪 (v3.0)
 
 | 特性 | 说明 | 状态 |
 |------|------|------|
@@ -115,7 +122,7 @@ open http://localhost:8080/panel
 
 ```
 ╔═══════════════════════════════════════════════════════════╗
-║              🟣 Triad Station v2.3 启动成功              ║
+║              🟣 Triad Station v3.0 启动成功              ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  Web UI:     http://localhost:8080/panel                  ║
 ║  Gateway:    ws://localhost:8080/ws/tasks               ║
@@ -217,8 +224,10 @@ triad/
 
 | 文档 | 说明 |
 |------|------|
-| [技术白皮书](triad/docs/TECHNICAL_WHITEPAPER_v2.3.1.md) | 架构全景图、完成度详表、API 参考、数据流图示 |
-| [用户指南](triad/docs/USER_GUIDE_v2.3.1.md) | 角色速查表、30分钟上手教程、FAQ |
+| [技术白皮书 v3.0](triad/docs/TECHNICAL_WHITEPAPER_v3.0.md) | OpenClaw Native 架构重构、代码变更详表、迁移指南 |
+| [集成指南](triad/docs/OPENCLAW_INTEGRATION_GUIDE.md) | 部署步骤、Skill 调用方式、WebSocket 协议说明 |
+| [技术白皮书 v2.3.1](triad/docs/TECHNICAL_WHITEPAPER_v2.3.1.md) | v2.x 架构全景图（历史参考） |
+| [用户指南 v2.3](triad/docs/USER_GUIDE_v2.3.md) | 角色速查表、30分钟上手教程、FAQ（历史参考） |
 | [续接指南](triad/docs/CONTINUATION_GUIDE.md) | 上下文恢复包（用于新 AI 助手续接） |
 
 ---
@@ -303,7 +312,7 @@ triad/
 
 - **文件数**: 79 个
 - **代码行**: ~16,500 行（Python/TypeScript/TSX/Bash/YAML）
-- **提交**: `3d8a96d` — Triad v2.3.1: Security patch — 58 bug fixes, 3-state circuit breaker, SSRF protection, API Key encryption
+- **提交**: `99b1a1d` — Triad v3.0.0: OpenClaw Native refactor — remove redundant Gateway, add Hermes Skill
 
 ---
 
@@ -324,5 +333,5 @@ Triad 是一个持续演进的社区项目。欢迎通过以下方式参与：
 ---
 
 <p align="center">
-  <strong>Triad v2.3.1 — 本地智能体操作系统，数据不出站，算力全掌控。</strong>
+  <strong>Triad v3.0.0 — 寄生进化，对话即运维。</strong>
 </p>

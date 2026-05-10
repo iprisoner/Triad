@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Triad v2.3.1 setup: 创建 install.sh + 修复 docker-compose.hpc.yml
+# Triad v3.0.0 setup: 创建 install.sh + docker-compose.v3.yml (OpenClaw Native)
 
 import os, yaml, re
 
