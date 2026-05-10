@@ -218,3 +218,12 @@ Triad v3.0 的架构决策得益于：
 ---
 
 > **Triad v3.0 — 寄生进化，对话即运维。**
+# Triad v3.1 技术白皮书增补 — Code Agent
+
+## v3.1 新增：代码 Agent 桥接
+
+v3.1 集成 CheetahClaws as code execution engine. Key additions:
+- code_agent_bridge.py — 3-tier delegation
+- manager_executor.py — hierarchical scheduling
+- memory_system.py — 3-layer memory
+- permission_gate.py — 5-layer permission pipeline

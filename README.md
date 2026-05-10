@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://raw.githubusercontent.com/iprisoner/Triad/main/assets/logo.png" alt="Triad Logo" width="120">
 </p>
-<h1 align="center">Triad v3.0.0 🦞 Lobster Station (OpenClaw Native)</h1>
+<h1 align="center">Triad v3.1.0 🦞 Lobster Station (Code Agent)</h1>
 <p align="center">
   <strong>本地 AI 智能体操作系统 · 蜂群并发 · 显存跷跷板 · 动态路由</strong>
 </p>
@@ -55,7 +55,21 @@ Triad 是一款运行在**本地 WSL2 环境**中的三层架构 AI 智能体操
 
 ## ✨ 核心特性
 
-### 已生产就绪 (v3.0)
+### 已生产就绪 (v3.1)
+
+| 特性 | 说明 | 状态 |
+|------|------|------|
+| **@角色系统** | `@novelist` / `@code_engineer` / `@art_director` 等 5+ 内置角色，独立 System Prompt + 模型偏好 + 权限管道 | ✅ |
+| **权限管道** | deny→ask→allow 三层权限 + Hard Deny 硬拒绝规则 + 角色级工具权限 | ✅ |
+| **代码 Agent** | CheetahClaws 桥接 — 15 个 Provider，API 统一，不需要 Anthropic 注册 | ✅ |
+| **无极蜂群** | `@deep_research_swarm` 触发多 Agent 并发 + Manager-Executor 层级调度 | ✅ |
+| **动态模型路由** | 不限厂商，无限添加，Web UI 管理，tags 匹配自动路由 | ✅ |
+| **显存跷跷板** | `-ngl 99↔0` GPU/CPU 自动切换，推理引用计数锁保证切换安全 | ✅ |
+| **三层记忆** | 对话摘要 + 关键事实三元组 + 技能配方（自动进化 + 语义去重） | ✅ |
+| **技能进化** | 高分任务自动固化配方为 Markdown+YAML，语义去重 + 适者生存 | ✅ |
+| **动态评估** | 小说→4维评估，代码→委派 Agent，通用→bypass，绝不浪费算力 | ✅ |
+| **断连恢复** | WebSocket 断开后重连自动恢复任务历史和进度 | ✅ |
+| **系统监控** | 3秒轮询 GPU/容器/llama/CPU/内存，实时显存条可视化 | ✅ |
 
 | 特性 | 说明 | 状态 |
 |------|------|------|

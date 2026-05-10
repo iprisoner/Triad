@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v3.1.0] - 2026-05-11
+
+### 🦞 Code Agent Integration
+
+v3.1 integrates CheetahClaws (nano-claude-code) as the code execution engine,
+adding production-grade coding capabilities through parasitic delegation.
+
+#### Added
+
+- **`skills/code_agent_bridge.py`** — 3-tier delegation to CheetahClaws (import/CLI/source)
+- **`mind/manager_executor.py`** — Hierarchical scheduling (Manager-Executor pattern)
+- **`mind/memory_system.py`** — 3-layer memory (conversation summary + fact triples + skill recipes)
+- **`mind/permission_gate.py`** — 5-layer deny→ask→allow permission pipeline with hard deny rules
+- **`PARITY.md`** — Feature parity table vs Aider/SWE-agent/Claude Code/claurst
+- **5 reference docs** — Architecture analysis of Claude Code leak, Aider, SWE-agent, claurst, claude-code-haha
+
+#### Updated
+
+- **`roles.py`** — All 5 roles now have deny_tools + ask_tools
+- **`hermes_skill.py`** — Added code/memory/manager CLI commands
+- **`webui/src/TriadPanel.tsx`** — New UI: left chat + right monitoring/config
+
+#### Capabilities
+
+| Capability | v3.0 | v3.1 |
+|-----------|:----:|:----:|
+| Code Agent | ❌ | ✅ CheetahClaws (15 providers) |
+| Permission Pipeline | ❌ | ✅ deny→ask→allow |
+| Memory System | ⚠️ | ✅ 3-layer |
+| Manager-Executor | ❌ | ✅ Hierarchical scheduling |
+
+---
+
 ## [v3.0.0] - 2026-05-10
 
 ### 🏗️ Architecture Refactor — OpenClaw Native
