@@ -481,7 +481,43 @@ def manage_provider(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 7. REST API 服务（可选，OpenClaw web_fetch 调用）
+# 7. 记忆系统工具 (v3.0 P0)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def get_memory_stats() -> dict:
+    """记忆系统统计"""
+    from mind.memory_system import MemorySystem
+    mem = MemorySystem()
+    return {"success": True, **mem.get_stats()}
+
+
+def search_memory(query: str, category: str = None, limit: int = 20) -> dict:
+    """搜索记忆事实"""
+    from mind.memory_system import MemorySystem
+    mem = MemorySystem()
+    facts = mem.search_facts(query, category, limit)
+    return {
+        "success": True,
+        "count": len(facts),
+        "facts": [{"category": f.category, "subject": f.subject, "predicate": f.predicate, "obj": f.obj} for f in facts],
+    }
+
+
+def summarize_conversation(task_id: str, messages: list = None) -> dict:
+    """压缩对话为摘要"""
+    from mind.memory_system import MemorySystem
+    mem = MemorySystem()
+    if messages is None:
+        summary = mem.load_summary(task_id)
+        if summary:
+            return {"success": True, "task_id": task_id, "summary": summary.summary, "topics": summary.key_topics}
+        return {"success": False, "error": "Summary not found"}
+    summary = mem.summarize_conversation(task_id, messages)
+    return {"success": True, "task_id": task_id, "summary": summary.summary, "topics": summary.key_topics}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 8. REST API 服务（可选，OpenClaw web_fetch 调用）
 # ═══════════════════════════════════════════════════════════════════════════
 
 async def serve_api(port: int = 19000):
@@ -609,6 +645,14 @@ def main():
     p_serve = subparsers.add_parser("serve", help="启动 REST API 服务")
     p_serve.add_argument("--port", type=int, default=19000)
 
+    # memory (v3.0)
+    p_mem = subparsers.add_parser("memory", help="记忆管理")
+    p_mem.add_argument("action", choices=["stats", "search", "summarize", "compact"])
+    p_mem.add_argument("query", nargs="?", default="")
+    p_mem.add_argument("--category", default=None)
+    p_mem.add_argument("--limit", type=int, default=20)
+    p_mem.add_argument("--task-id", default="")
+
     args = parser.parse_args()
 
     if args.command == "serve":
@@ -659,6 +703,23 @@ def main():
             "extra_tools": args.extra_tools,
         }
         print(json.dumps(evolve_skill(args.recipe_id, adjustments), ensure_ascii=False, indent=2))
+    elif args.command == "memory":
+        if args.action == "stats":
+            print(json.dumps(get_memory_stats(), ensure_ascii=False, indent=2))
+        elif args.action == "search":
+            result = search_memory(args.query, args.category, args.limit)
+            if result["facts"]:
+                for f in result["facts"]:
+                    print(f"[{f['category']}] {f['subject']} {f['predicate']} {f['obj']}")
+            else:
+                print("未找到匹配的事实")
+        elif args.action == "summarize":
+            result = summarize_conversation(args.task_id or "latest")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        elif args.action == "compact":
+            from mind.memory_system import MemorySystem
+            n = MemorySystem().compact_conversations()
+            print(json.dumps({"success": True, "compacted": n}, ensure_ascii=False))
     else:
         parser.print_help()
 
