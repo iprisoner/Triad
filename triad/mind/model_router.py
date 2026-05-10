@@ -514,6 +514,7 @@ class ModelRouter:
         self.registry = registry or ModelRegistry()
         self.aligner = aligner or ContextAligner()
         self.fallback = fallback_chain or FallbackChain(self.registry, self.aligner)
+        self._http_client = None  # 懒加载 httpx.AsyncClient
 
     # ------------------------------------------------------------------
     # 5.1 路由决策 (v2.1 动态加载)

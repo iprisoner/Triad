@@ -148,6 +148,7 @@ export class TaskWebSocketGateway {
     finalResult?: { status: string; output?: string; error?: string };
     createdAt: number;
     updatedAt: number;
+    userId?: string;  // v2.3.1-fix: 用于断连恢复时按用户过滤
   }> = new Map();
 
   /** 任务历史保留上限（内存防泄漏） */
@@ -371,6 +372,9 @@ export class TaskWebSocketGateway {
     const strategy = msg.strategy || 'AUTO';
     const channel = msg.channel || 'web';
     const userId = msg.userId || 'anonymous';
+
+    // 预记录 userId 到任务历史，用于断连恢复时按用户过滤
+    this.recordTaskUserId(taskId, userId);
 
     // ── 立即返回 ANALYZING 状态 ────────────────────────────────────────────
     const ackMessage: TaskStreamMessage = {
@@ -665,8 +669,9 @@ export class TaskWebSocketGateway {
       finalResult?: { status: string; output?: string; error?: string };
     }> = [];
 
-    // 收集该用户的所有任务历史（简化：收集最近 20 条）
+    // 收集该用户的任务历史（按 userId 过滤，最近 20 条）
     const entries = Array.from(this.taskHistoryStore.entries())
+      .filter(([_, h]) => h.userId === userId)
       .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
       .slice(0, 20);
 
@@ -689,6 +694,22 @@ export class TaskWebSocketGateway {
     console.log(
       `[Gateway] recover_tasks: sent ${recoveredTasks.length} task(s) to reconnecting client`
     );
+  }
+
+  /**
+   * 预记录任务的 userId（在 Hermes 层开始上报状态之前调用）。
+   */
+  private recordTaskUserId(taskId: string, userId: string): void {
+    let history = this.taskHistoryStore.get(taskId);
+    if (!history) {
+      history = {
+        stages: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      this.taskHistoryStore.set(taskId, history);
+    }
+    history.userId = userId;
   }
 
   /**

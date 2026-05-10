@@ -269,13 +269,13 @@ class SwarmExecutor:
         except asyncio.TimeoutError:
             self.logger.error("[Swarm] 蜂群执行整体超时")
             gathered = []
-            for _ in task.agents:
+            for agent in task.agents:
                 gathered.append(AgentResult(
-                    agent_name="unknown",
+                    agent_name=getattr(agent, 'name', 'unknown'),
                     content="",
-                    status="timeout",
-                    latency_ms=0,
-                    tokens_used=0,
+                    model_used="",
+                    error="Swarm execution timed out",
+                    success=False,
                 ))
 
         results: List[AgentResult] = []
@@ -492,7 +492,7 @@ class SwarmExecutor:
         根据指定聚合模式将多个 Agent 结果合并为单一输出。
 
         策略说明：
-        - CONCAT：使用 "\n\n---\n\n" 分隔拼接所有成功结果；
+        - CONCAT：使用 "\\n\\n---\\n\\n" 分隔拼接所有成功结果；
         - JOIN：使用 context 中 join_delimiter（默认换行）拼接；
         - BEST：优先调用 evaluator，否则选择 completion_tokens 最多的结果；
         - MERGE：按段落去重后保留顺序拼接。
@@ -503,6 +503,13 @@ class SwarmExecutor:
         :param evaluator: 外部评估函数，用于 BEST 模式
         :return: 聚合后的字符串内容
         """
+        # 兼容性处理：如果 mode 是字符串（来自 stub），转换为枚举
+        if isinstance(mode, str):
+            try:
+                mode = AggregationMode(mode)
+            except ValueError:
+                self.logger.warning(f"未知聚合模式 '{mode}'，回退到 CONCAT")
+                mode = AggregationMode.CONCAT
         successful = [r for r in results if r.success and r.content]
         if not successful:
             return ""
