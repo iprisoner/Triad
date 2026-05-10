@@ -653,6 +653,10 @@ def main():
     p_mem.add_argument("--limit", type=int, default=20)
     p_mem.add_argument("--task-id", default="")
 
+    # manager (v3.0)
+    p_mgr = subparsers.add_parser("manager", help="Manager-Executor 层级调度")
+    p_mgr.add_argument("task", nargs="?", default="")
+
     args = parser.parse_args()
 
     if args.command == "serve":
@@ -720,6 +724,21 @@ def main():
             from mind.memory_system import MemorySystem
             n = MemorySystem().compact_conversations()
             print(json.dumps({"success": True, "compacted": n}, ensure_ascii=False))
+    elif args.command == "manager" and args.task:
+        from mind.manager_executor import ManagerExecutor
+        mex = ManagerExecutor(router=None, reporter=None)
+        result = asyncio.run(mex.execute(args.task))
+        print(json.dumps({
+            "success": True,
+            "task_id": result.task_id,
+            "subtasks": len(result.plan.subtasks),
+            "aggregation": result.plan.aggregation_strategy,
+            "success_count": result.success_count,
+            "failed_count": result.failed_count,
+            "total_tokens": result.total_tokens,
+            "cost_saved_pct": result.cost_saved_pct,
+            "final_output": result.final_output[:500],
+        }, ensure_ascii=False, indent=2))
     else:
         parser.print_help()
 
