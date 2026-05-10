@@ -657,6 +657,12 @@ def main():
     p_mgr = subparsers.add_parser("manager", help="Manager-Executor 层级调度")
     p_mgr.add_argument("task", nargs="?", default="")
 
+    # code (v3.1)
+    p_code = subparsers.add_parser("code", help="代码任务 — 委派给 CheetahClaws")
+    p_code.add_argument("task", nargs="?", default="")
+    p_code.add_argument("--dir", default=None)
+    p_code.add_argument("--model", default=None)
+
     args = parser.parse_args()
 
     if args.command == "serve":
@@ -739,6 +745,11 @@ def main():
             "cost_saved_pct": result.cost_saved_pct,
             "final_output": result.final_output[:500],
         }, ensure_ascii=False, indent=2))
+    elif args.command == "code" and args.task:
+        from skills.code_agent_bridge import CodeAgentBridge
+        bridge = CodeAgentBridge()
+        result = bridge.run(args.task, args.dir, args.model)
+        print(result["output"] if result.get("success") else f"Error: {result.get('error')}")
     else:
         parser.print_help()
 
