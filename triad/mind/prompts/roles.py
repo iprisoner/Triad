@@ -17,13 +17,17 @@ class RoleConfig:
 
     每个角色拥有独立的身份设定、能力边界和工具权限，
     确保在不同场景下 Agent 的行为一致且可控。
+
+    v3.0: 新增 deny_tools / ask_tools，实现三层权限管道。
     """
 
     id: str
     name: str
     system_prompt: str
     model_pref: str = "CHAT"            # 优先路由策略：CREATIVE / REASONING / LONGFORM / CHAT / REVIEW
-    allowed_tools: List[str] = field(default_factory=list)  # 允许调用的 MCP 工具 / 内置工具
+    allowed_tools: List[str] = field(default_factory=list)  # 自动放行的工具
+    deny_tools: List[str] = field(default_factory=list)     # v3.0: 永远禁止的工具（高于 allowed）
+    ask_tools: List[str] = field(default_factory=list)      # v3.0: 需用户确认的工具
     temperature: float = 0.7
     max_tokens: int = 4096
     description: str = ""               # 一句话描述，用于前端展示
@@ -60,6 +64,8 @@ ROLES: dict[str, RoleConfig] = {
 语气：严谨、专业、直接。不喜欢废话。""",
         model_pref="REASONING",
         allowed_tools=["read", "edit", "bash", "git", "search_code", "run_test"],
+        deny_tools=["gateway.restart", "docker.kill", "docker.rm"],
+        ask_tools=["docker.update", "npm.install", "pip.install"],
         temperature=0.3,
         max_tokens=4096,
         description="擅长代码重构、Bug 修复、全栈开发",
@@ -93,6 +99,8 @@ ROLES: dict[str, RoleConfig] = {
 语气：细节控、强迫症、对像素级对齐有执念。""",
         model_pref="REASONING",
         allowed_tools=["read", "edit", "bash", "git", "npm_install"],
+        deny_tools=["gateway.restart", "docker.kill"],
+        ask_tools=["npm.install", "pip.install"],
         temperature=0.3,
         max_tokens=4096,
         description="React/TypeScript/Tailwind 专家，组件架构师",
@@ -126,7 +134,9 @@ ROLES: dict[str, RoleConfig] = {
 
 语气：敏感、细腻、对文字有洁癖。每个形容词都要经得起推敲。""",
         model_pref="CREATIVE",
-        allowed_tools=["read", "write", "memory_search"],  # 只能读写文本，不能执行代码
+        allowed_tools=["read", "write", "memory_search"],
+        deny_tools=["bash", "edit", "git", "gateway.restart"],
+        ask_tools=[],
         temperature=0.8,
         max_tokens=8192,
         description="现实主义小说家，擅长人物塑造和情节设计",
@@ -157,6 +167,8 @@ ROLES: dict[str, RoleConfig] = {
 注意：当前版本仅生成文字描述，不生成实际图像。图片生成未来通过 MCP 插件接入。""",
         model_pref="CREATIVE",
         allowed_tools=["read", "write"],
+        deny_tools=["bash", "edit", "git", "gateway.restart", "docker"],
+        ask_tools=[],
         temperature=0.9,
         max_tokens=2048,
         description="概念设计专家，用文字描绘视觉画面",
@@ -200,6 +212,8 @@ ROLES: dict[str, RoleConfig] = {
 语气：冷静、条理清晰、对"生产环境"三个字有敬畏心。""",
         model_pref="REASONING",
         allowed_tools=["read", "bash", "docker_exec", "docker_logs", "system_monitor"],
+        deny_tools=["rm", "drop_database", "gateway.restart"],
+        ask_tools=["docker.kill", "systemctl.restart", "gateway.config.patch"],
         temperature=0.3,
         max_tokens=4096,
         description="Docker/K8s 专家，基础设施和自动化",
