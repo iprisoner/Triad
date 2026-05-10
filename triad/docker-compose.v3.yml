@@ -1,0 +1,208 @@
+# ═══════════════════════════════════════════════════════════════
+# Triad v3.0 — docker-compose.hpc.yml (OpenClaw Native)
+#
+# 变更 (v3.0):
+#   - 移除 openclaw Gateway 服务（改由 OpenClaw 原生管理）
+#   - 新增 hermes-skill-api（Hermes → OpenClaw 桥接 REST API）
+#   - 保留 hermes / qdrant / registry / llama-server
+# ═══════════════════════════════════════════════════════════════
+
+version: '3.9'
+
+networks:
+  triad-core:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.1.0/24
+    driver_opts:
+      com.docker.network.bridge.name: br-triad-core
+      com.docker.network.driver.mtu: '1450'
+  triad-data:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.2.0/24
+    driver_opts:
+      com.docker.network.bridge.name: br-triad-data
+      com.docker.network.driver.mtu: '1450'
+  triad-worker:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.3.0/24
+    driver_opts:
+      com.docker.network.bridge.name: br-triad-worker
+      com.docker.network.driver.mtu: '1450'
+
+volumes:
+  qdrant-storage:
+    driver: local
+  hermes-memory:
+    driver: local
+  registry-data:
+    driver: local
+
+services:
+  # ─── Hermes 认知编排 ─────────────────────────────────────────────
+  hermes:
+    build:
+      context: ./hermes
+      dockerfile: Dockerfile
+      args:
+        PYTHON_VERSION: '3.11'
+        INSTALL_DEV: 'false'
+    image: triad/hermes:hpc-latest
+    container_name: triad-hermes
+    restart: unless-stopped
+    cpuset: 8-11,32-35
+    deploy:
+      resources:
+        limits:
+          memory: 24G
+    environment:
+      PYTORCH_CUDA_ALLOC_CONF: max_split_size_mb:512,expandable_segments:True
+      LLM_API_URL: http://192.168.0.128:40080/v1/chat/completions
+      LLM_API_BASE: http://192.168.0.128:40080
+      LLM_MODEL_NAME: qwen-14b-chat.Q4_K_M.gguf
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: '16333'
+      QDRANT_COLLECTION_NAME: hermes-memory
+      PYTHONUNBUFFERED: '1'
+      LOG_LEVEL: INFO
+    ports:
+      - '18000:18000'
+    volumes:
+      - hermes-memory:/app/memory
+      - ${TRIAD_ROOT:-~/.triad}:/root/.triad:ro
+    networks:
+      - triad-core
+      - triad-data
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      - qdrant
+
+  # ─── Hermes Skill API（新增：OpenClaw 桥接层）───────────────────
+  hermes-skill-api:
+    build:
+      context: ../
+      dockerfile: triad/hermes/Dockerfile
+      args:
+        PYTHON_VERSION: '3.11'
+        INSTALL_DEV: 'false'
+    image: triad/hermes-skill-api:latest
+    container_name: triad-hermes-skill-api
+    restart: unless-stopped
+    cpuset: 12-13,36-37
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    environment:
+      HERMES_ORCHESTRATOR_URL: http://hermes:18000
+      LLM_API_URL: http://192.168.0.128:40080/v1/chat/completions
+      PYTHONUNBUFFERED: '1'
+      LOG_LEVEL: INFO
+    command: python -m skills.hermes_skill serve --port 19000
+    ports:
+      - '19000:19000'
+    volumes:
+      - hermes-memory:/app/memory
+      - ${TRIAD_ROOT:-~/.triad}:/root/.triad:rw
+    networks:
+      - triad-core
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    depends_on:
+      - hermes
+
+  # ─── Qdrant 向量数据库 ────────────────────────────────────────────
+  qdrant:
+    image: qdrant/qdrant:v1.8.0
+    container_name: triad-qdrant
+    restart: unless-stopped
+    cpuset: 20-21,44-45
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 2G
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: '16333'
+      QDRANT__STORAGE__STORAGE_PATH: /qdrant/storage
+      QDRANT__STORAGE__WAL_CAPACITY_MB: '64'
+    volumes:
+      - qdrant-storage:/qdrant/storage
+    ports:
+      - '16333:16333'
+    networks:
+      - triad-data
+
+  # ─── 注册表 ──────────────────────────────────────────────────────
+  registry:
+    build:
+      context: ./registry
+      dockerfile: Dockerfile
+    image: triad/registry:hpc-latest
+    container_name: triad-registry
+    restart: unless-stopped
+    cpuset: 22-23,46-47
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 256M
+    environment:
+      REGISTRY_BIND: 0.0.0.0:18500
+      REGISTRY_HEARTBEAT_SEC: '30'
+      REGISTRY_TTL_SEC: '300'
+    ports:
+      - '18500:18500'
+    volumes:
+      - registry-data:/data
+    networks:
+      - triad-core
+
+  # ─── llama-server（HPC 模式，-ngl 99↔0 跷跷板）─────────────────
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: triad-llama-server
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+        reservations:
+          memory: 8G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities:
+                - gpu
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: '0'
+      CUDA_VISIBLE_DEVICES: '0'
+    command:
+      - --host
+      - '0.0.0.0'
+      - --port
+      - '8080'
+      - --model
+      - /models/model.gguf
+      - --n-gpu-layers
+      - '99'
+      - --ctx-size
+      - '8192'
+    ports:
+      - '40080:8080'
+    volumes:
+      - type: bind
+        source: ~/.triad/models
+        target: /models
+        read_only: true
+    networks:
+      - triad-worker

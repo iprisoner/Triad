@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v3.0.0] - 2026-05-10
+
+### 🏗️ Architecture Refactor — OpenClaw Native
+
+v3.0 is a **parasitic evolution**: Triad no longer runs its own message gateway.
+All gateway functionality is delegated to OpenClaw's production-grade infrastructure.
+
+#### Removed
+
+- **`host/openclaw/src/gateway/websocket.ts`** (400 lines) — Replaced by OpenClaw native WebSocket
+- **`host/openclaw/src/gateway/api.ts`** (350 lines) — Replaced by OpenClaw native REST API
+- **`host/openclaw/src/gateway/monitor.ts`** (200 lines) — Replaced by Hermes Skill API
+- **`webui/src/BrowserShell.tsx`** — Replaced by TriadPanel.tsx
+- **`webui/src/hooks/useWebSocket.ts`** — Replaced by useOpenClawWS.ts
+
+#### Added
+
+- **`skills/hermes_skill.py`** — Hermes full capability CLI + REST API for OpenClaw
+- **`skills/TRIAD_SYSTEM_PROMPT.md`** — Model auth to directly modify system config
+- **`webui/src/TriadPanel.tsx`** — New UI: left chat + right monitoring/config
+- **`webui/src/hooks/useOpenClawWS.ts`** — OpenClaw native WebSocket hook
+- **`docker-compose.v3.yml`** — Simplified deployment (no redundant Gateway service)
+- **`skills/hermes-skill-api`** — New Docker service for Hermes REST bridge
+- **`docs/OPENCLAW_INTEGRATION_GUIDE.md`** — Full integration guide
+- **`docs/TECHNICAL_WHITEPAPER_v3.0.md`** — v3.0 technical whitepaper
+
+#### Key Design Changes
+
+- Model can now **directly modify config** during conversation (no more "I suggest you...")
+- VRAM switching, provider management, role tuning — all done via chat
+- WebUI is pure frontend, zero local state, all data from OpenClaw WS + Hermes API
+- Reduced ~950 lines of TypeScript (removed redundant code)
+- Architecture: `OpenClaw Gateway → Hermes Skill → Infrastructure`
+
+---
+
 ## [v2.3.1] - 2026-05-06
 
 ### 🚨 Security Patch Release
