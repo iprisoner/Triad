@@ -42,8 +42,9 @@ class ConfigManager:
             "gateway_port": _safe_int("GATEWAY_PORT", "18080"),
             "llama_port": _safe_int("LLAMA_PORT", "18000"),
             "llama_model_path": os.getenv("LLAMA_MODEL_PATH", ""),
-            "comfyui_host": os.getenv("COMFYUI_HOST", "host.docker.internal"),
-            "comfyui_port": int(os.getenv("COMFYUI_PORT", "18188")),
+            # v3.0: ComfyUI 已移除
+            # "comfyui_host": os.getenv("COMFYUI_HOST", "host.docker.internal"),
+            # "comfyui_port": int(os.getenv("COMFYUI_PORT", "18188")),
             "hf_endpoint": os.getenv("HF_ENDPOINT", "https://huggingface.co"),
         }
         

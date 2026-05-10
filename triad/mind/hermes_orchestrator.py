@@ -220,25 +220,8 @@ except Exception:
             return True
 
 
-# --- ComfyUIMCPBridge ---
-try:
-    from hand.comfyui_mcp_bridge import ComfyUIMCPBridge as _ComfyUIMCPBridge
-except Exception:
-    class _ComfyUIMCPBridge:
-        """ComfyUIMCPBridge stub — 概念图生成"""
-        async def generate_character_concept(
-            self,
-            character_description: str,
-            style_preset: str = "anime",
-            **kwargs: Any,
-        ) -> ToolResult:
-            logger.warning("[STUB] ComfyUIMCPBridge.generate_character_concept() 返回占位图")
-            await asyncio.sleep(0.1)
-            return ToolResult(
-                success=True,
-                output="/tmp/stub_concept_art.png",
-                error="",
-            )
+# --- ComfyUI (v3.0 已移除，未来通过 MCP 插件接入) ---
+# 原 comfyui_mcp_bridge.py 已删除，MULTIMODAL 步骤默认 bypass
 
 
 # --- SwarmExecutor (v2.2 蜂群调度器) ---
@@ -355,7 +338,6 @@ class HermesOrchestrator:
         curator: Optional[_NovelCurator] = None,
         reporter: Optional[_StreamingReporter] = None,
         vram_scheduler: Optional[_VRAMScheduler] = None,
-        comfy_bridge: Optional[_ComfyUIMCPBridge] = None,
         swarm_executor: Optional[_SwarmExecutor] = None,
         skill_crystallizer: Optional[_SkillCrystallizer] = None,
     ) -> None:
@@ -367,7 +349,6 @@ class HermesOrchestrator:
             curator: 小说评估器实例
             reporter: 流式上报器实例
             vram_scheduler: 显存调度器实例
-            comfy_bridge: ComfyUI 桥接实例
             swarm_executor: 蜂群调度器实例（可选，延迟初始化亦可）
             skill_crystallizer: 技能结晶器实例（可选）
         """
@@ -375,7 +356,6 @@ class HermesOrchestrator:
         self.curator = curator or _NovelCurator(router=self.router)
         self.reporter = reporter or _StreamingReporter()
         self.vram_scheduler = vram_scheduler or _VRAMScheduler()
-        self.comfy_bridge = comfy_bridge or _ComfyUIMCPBridge()
         self.swarm_executor = swarm_executor
         self.skill_crystallizer = skill_crystallizer or _SkillCrystallizer()
         logger.info("HermesOrchestrator 初始化完成")
