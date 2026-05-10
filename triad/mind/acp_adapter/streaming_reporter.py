@@ -213,8 +213,8 @@ class StreamingReporter:
         state: str,
         embedding_mb: int,
         llm_mb: int,
-        comfyui_mb: int,
         free_mb: int,
+        other_mb: int = 0,
     ) -> bool:
         """
         推送 VRAM 状态（非阻塞）。
@@ -226,8 +226,8 @@ class StreamingReporter:
             state: 显存状态摘要（如 ``normal``, ``warning``, ``critical``）。
             embedding_mb: Embedding 模型占用的显存（MB）。
             llm_mb: LLM 占用的显存（MB）。
-            comfyui_mb: ComfyUI / 图像管线占用的显存（MB）。
             free_mb: 剩余可用显存（MB）。
+            other_mb: 其他占用的显存（MB，v3.0 中 ComfyUI 已移除）。
 
         Returns:
             始终返回 True，表示后台上报任务已成功调度。
@@ -240,7 +240,6 @@ class StreamingReporter:
                 "state": state,
                 "embeddingMb": embedding_mb,
                 "llmMb": llm_mb,
-                "comfyuiMb": comfyui_mb,
                 "freeMb": free_mb,
             },
         }
